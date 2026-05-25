@@ -2,24 +2,24 @@
 name: rekor
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
-  installing the `rekor` CLI, authenticating, creating a workspace, defining the first
-  collection, working in preview and promoting to production, querying records via SQL,
+  installing the `rekor` CLI, authenticating, creating a database, defining the first
+  collection, working in preview and promoting to production, querying documents via SQL,
   managing relationships, configuring hooks/triggers/batch operations, importing or
   exporting tool definitions across providers (OpenAI/Anthropic/Google/MCP), creating
   curated MCP Factory endpoints, scoping API tokens, or interpreting Rekor concepts
-  (workspace, collection, record, relationship, preview/production, external_id).
+  (database, collection, document, relationship, preview/production, external_id).
 ---
 
 # Rekor — Data Layer for AI Agents
 
-You have access to the `rekor` CLI — the builder interface for Rekor. Use it to set up schemas, configure collections, test in preview environments, and promote to production. Production agents use MCP tools to read/write records; external systems integrate via REST API. The CLI is your tool for designing and managing the data model.
+You have access to the `rekor` CLI — the builder interface for Rekor. Use it to set up schemas, configure collections, test in preview environments, and promote to production. Production agents use MCP tools to read/write documents; external systems integrate via REST API. The CLI is your tool for designing and managing the data model.
 
 ## Agent Guidelines
 
 - Drive Rekor through the **`rekor` CLI** when you have shell access. If you also have `mcp__rekor__*` tools in your toolset, prefer the CLI for setup and configuration; reserve MCP tools for production read/write operations.
 - Only provide information from this skill, tool descriptions, or reference documentation. Do not invent URLs, paths, commands, or flags.
-- Schema work (collections, hooks, triggers, MCP Factory endpoints) only happens in **preview** workspaces. Always create or use a preview before changing schemas.
-- **Promotion is human-only.** When schema is ready, surface the exact `rekor workspaces promote` command and wait for the user to run it.
+- Schema work (collections, hooks, triggers, MCP Factory endpoints) only happens in **preview** databases. Always create or use a preview before changing schemas.
+- **Promotion is human-only.** When schema is ready, surface the exact `rekor databases promote` command and wait for the user to run it.
 - Tokens are shown only **once on creation**. Always tell the user to copy and store it before doing anything else.
 - Never auto-commit. Show the user `git diff` (when working with schema files) and wait for approval.
 
@@ -27,7 +27,7 @@ You have access to the `rekor` CLI — the builder interface for Rekor. Use it t
 
 ## First-Time Setup Walkthrough
 
-When the user is starting from scratch, walk them through these steps. Skip any that are already done — check with `rekor workspaces list` before assuming.
+When the user is starting from scratch, walk them through these steps. Skip any that are already done — check with `rekor databases list` before assuming.
 
 ### 1. Install the CLI
 
@@ -53,32 +53,32 @@ rekor login --token rec_xxx
 
 If the user does **not** have an account yet, direct them to [rekor.pro](https://rekor.pro) — free plan includes 2,000 operations per month, no credit card required.
 
-### 3. Create a workspace
+### 3. Create a database
 
-Workspaces are top-level data containers. One per app, domain, or tenant.
+Databases are top-level data containers. One per app, domain, or tenant.
 
 ```bash
-rekor workspaces create <id> --name "<Display Name>" [--tags <comma-separated>]
+rekor databases create <id> --name "<Display Name>" [--tags <comma-separated>]
 ```
 
-Set `REKOR_WORKSPACE=<id>` in the user's shell to avoid passing `--workspace` on every command.
+Set `REKOR_DATABASE=<id>` in the user's shell to avoid passing `--database` on every command.
 
 ### 4. Create a preview environment
 
-Schema changes (collections, hooks, triggers, MCP Factory endpoints) are blocked in production workspaces. Create a preview to do schema work:
+Schema changes (collections, hooks, triggers, MCP Factory endpoints) are blocked in production databases. Create a preview to do schema work:
 
 ```bash
-rekor workspaces create-preview <id> --name "<preview-slug>"
+rekor databases create-preview <id> --name "<preview-slug>"
 ```
 
-The resulting preview workspace ID is `<id>--<preview-slug>`. Use that as `--workspace` for all schema commands.
+The resulting preview database ID is `<id>--<preview-slug>`. Use that as `--database` for all schema commands.
 
 ### 5. Define the first collection
 
-A collection is a JSON Schema that defines a record type. Define it in the preview workspace:
+A collection is a JSON Schema that defines a document type. Define it in the preview database:
 
 ```bash
-rekor collections upsert <slug> --workspace <id>--<preview-slug> \
+rekor collections upsert <slug> --database <id>--<preview-slug> \
   --name "<Display Name>" \
   --schema '{"type":"object","properties":{...},"required":[...]}'
 ```
@@ -87,17 +87,17 @@ For schemas longer than a line, write them to a file and pass `--schema @path/to
 
 ### 6. Test in preview, then ask the user to promote
 
-Write some test records to the preview, query them, iterate until the schema is right:
+Write some test documents to the preview, query them, iterate until the schema is right:
 
 ```bash
-rekor records upsert <slug> --workspace <id>--<preview-slug> --data '{...}'
-rekor sql "SELECT * FROM records FINAL WHERE workspace_id = {workspace_id:String} AND collection = '<slug>' AND deleted = false" --workspace <id>--<preview-slug>
+rekor documents upsert <slug> --database <id>--<preview-slug> --data '{...}'
+rekor sql "SELECT * FROM documents FINAL WHERE database_id = {database_id:String} AND collection = '<slug>' AND deleted = false" --database <id>--<preview-slug>
 ```
 
 When ready, surface the promotion command for the user to run (you cannot promote yourself):
 
 ```bash
-rekor workspaces promote <id> --from <id>--<preview-slug>
+rekor databases promote <id> --from <id>--<preview-slug>
 ```
 
 Recommend `--dry-run` first to preview the diff.
@@ -110,7 +110,7 @@ Two ways to give production agents access:
 
 ```bash
 rekor tokens create --name "<agent-name>" \
-  --grants '[{"scope":{"workspaces":["<id>"],"environments":["production"]},"permissions":["read:records","write:records"]}]'
+  --grants '[{"scope":{"databases":["<id>"],"environments":["production"]},"permissions":["read:documents","write:documents"]}]'
 ```
 
 The raw token (`rec_...`) is shown **once**. Copy it immediately.
@@ -123,45 +123,45 @@ See the [MCP Factory](#mcp-factory-custom-mcp-endpoints) section below.
 
 ## Core Concepts
 
-- **Collection**: A schema (JSON Schema) that defines a record type. No migrations — create at runtime.
-- **Record**: A JSON document conforming to a collection's schema.
-- **Relationship**: A typed, directed link between two records with optional metadata.
+- **Collection**: A schema (JSON Schema) that defines a document type. No migrations — create at runtime.
+- **Document**: A JSON document conforming to a collection's schema.
+- **Relationship**: A typed, directed link between two documents with optional metadata.
 
 ## Quick Start
 
 ### 1. Create a collection
 
 ```bash
-rekor collections upsert invoices --workspace my-ws \
+rekor collections upsert invoices --database my-ws \
   --name "Invoices" \
   --schema '{"type":"object","properties":{"customer":{"type":"string"},"amount":{"type":"number"},"status":{"type":"string","enum":["draft","issued","paid"]}},"required":["customer","amount"]}'
 ```
 
-### 2. Create a record
+### 2. Create a document
 
 ```bash
-rekor records upsert invoices --workspace my-ws \
+rekor documents upsert invoices --database my-ws \
   --data '{"customer":"Acme Corp","amount":5000,"status":"draft"}'
 ```
 
 With external ID for idempotent upsert:
 
 ```bash
-rekor records upsert invoices --workspace my-ws \
+rekor documents upsert invoices --database my-ws \
   --data '{"customer":"Acme Corp","amount":5000}' \
   --external-id inv_123 --external-source billing
 ```
 
-### 3. Query records
+### 3. Query documents
 
 ```bash
-rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM records FINAL WHERE workspace_id = {workspace_id:String} AND collection = 'invoices' AND deleted = false ORDER BY total DESC" --workspace my-ws
+rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents FINAL WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false ORDER BY total DESC" --database my-ws
 ```
 
-### 4. Link records
+### 4. Link documents
 
 ```bash
-rekor relationships upsert --workspace my-ws \
+rekor relationships upsert --database my-ws \
   --source invoices/rec_abc --target customers/rec_xyz \
   --type belongs_to
 ```
@@ -169,7 +169,7 @@ rekor relationships upsert --workspace my-ws \
 ### 5. Traverse relationships
 
 ```bash
-rekor query-relationships invoices rec_abc --workspace my-ws \
+rekor query-relationships invoices rec_abc --database my-ws \
   --type belongs_to --direction outgoing
 ```
 
@@ -177,46 +177,46 @@ rekor query-relationships invoices rec_abc --workspace my-ws \
 
 ## Full Command Reference
 
-### Workspaces
+### Databases
 
 ```bash
-rekor workspaces list [--tag <tag>]
-rekor workspaces get <id>
-rekor workspaces create <id> --name <name> [--description <desc>] [--tags <comma-separated>]
-rekor workspaces tag <id> --tags <comma-separated>
-rekor workspaces delete <id>
+rekor databases list [--tag <tag>]
+rekor databases get <id>
+rekor databases create <id> --name <name> [--description <desc>] [--tags <comma-separated>]
+rekor databases tag <id> --tags <comma-separated>
+rekor databases delete <id>
 ```
 
-Tags let you group workspaces (e.g., `client:acme,billing`). Filter with `--tag`.
+Tags let you group databases (e.g., `client:acme,billing`). Filter with `--tag`.
 
 ### Collections
 
 ```bash
-rekor collections list --workspace <ws>
-rekor collections get <id> --workspace <ws>
-rekor collections upsert <id> --workspace <ws> --name <name> --schema <json|@file>
-rekor collections delete <id> --workspace <ws>
+rekor collections list --database <ws>
+rekor collections get <id> --database <ws>
+rekor collections upsert <id> --database <ws> --name <name> --schema <json|@file>
+rekor collections delete <id> --database <ws>
 ```
 
-### Records
+### Documents
 
 ```bash
-rekor records upsert <collection> --workspace <ws> --data <json|@file> [--id <uuid>] [--external-id <id>] [--external-source <src>]
-rekor records get <collection> <id> --workspace <ws>
-rekor records delete <collection> <id> --workspace <ws>
+rekor documents upsert <collection> --database <ws> --data <json|@file> [--id <uuid>] [--external-id <id>] [--external-source <src>]
+rekor documents get <collection> <id> --database <ws>
+rekor documents delete <collection> <id> --database <ws>
 ```
 
 ### SQL Query
 
-Execute read-only SQL queries directly against workspace data. Supports filtering, aggregation, JOINs, CTEs, and array operations.
+Execute read-only SQL queries directly against database data. Supports filtering, aggregation, JOINs, CTEs, and array operations.
 
 ```bash
-rekor sql "<query>" --workspace <ws> [--param key=value ...] [--file query.sql]
+rekor sql "<query>" --database <ws> [--param key=value ...] [--file query.sql]
 ```
 
-**Tables**: `records`, `relationships`, `collections`, `workspaces`, `operations_log`
+**Tables**: `documents`, `relationships`, `collections`, `databases`, `operations_log`
 
-**Important**: Always include `workspace_id = {workspace_id:String}`, `deleted = false`, and `FINAL` after table names.
+**Important**: Always include `database_id = {database_id:String}`, `deleted = false`, and `FINAL` after table names.
 
 **Accessing JSON fields**: Use `data.field.:Type` subcolumn syntax for the native JSON type. Use `CAST(data.field, 'Type')` when type-safe conversion is needed (e.g., integers stored as Int64 vs Float64).
 
@@ -224,31 +224,31 @@ rekor sql "<query>" --workspace <ws> [--param key=value ...] [--file query.sql]
 
 ```bash
 # Simple query
-rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status FROM records FINAL WHERE workspace_id = {workspace_id:String} AND collection = 'invoices' AND deleted = false" --workspace my-ws
+rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status FROM documents FINAL WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false" --database my-ws
 
 # Aggregation
-rekor sql "SELECT data.status.:String as status, count() as cnt FROM records FINAL WHERE workspace_id = {workspace_id:String} AND collection = 'invoices' AND deleted = false GROUP BY status" --workspace my-ws
+rekor sql "SELECT data.status.:String as status, count() as cnt FROM documents FINAL WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY status" --database my-ws
 
 # Array aggregation (sum embedded line items)
-rekor sql "SELECT data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM records FINAL WHERE workspace_id = {workspace_id:String} AND collection = 'invoices' AND deleted = false" --workspace my-ws
+rekor sql "SELECT data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents FINAL WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false" --database my-ws
 
 # Explode array elements with ARRAY JOIN
-rekor sql "SELECT item.description.:String as item, sum(CAST(item.amount, 'Float64')) as revenue FROM records FINAL ARRAY JOIN data.line_items[] as item WHERE workspace_id = {workspace_id:String} AND collection = 'invoices' AND deleted = false GROUP BY item ORDER BY revenue DESC" --workspace my-ws
+rekor sql "SELECT item.description.:String as item, sum(CAST(item.amount, 'Float64')) as revenue FROM documents FINAL ARRAY JOIN data.line_items[] as item WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY item ORDER BY revenue DESC" --database my-ws
 
-# CTE joining records with relationships
-rekor sql "WITH inv AS (SELECT id, data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM records FINAL WHERE workspace_id = {workspace_id:String} AND collection = 'invoices' AND deleted = false), pay AS (SELECT target_id, sum(CAST(data.allocated, 'Float64')) as paid FROM relationships FINAL WHERE workspace_id = {workspace_id:String} AND rel_type = 'payment_for' AND deleted = false GROUP BY target_id) SELECT inv.num, inv.total, coalesce(pay.paid, 0) as paid, inv.total - coalesce(pay.paid, 0) as balance FROM inv LEFT JOIN pay ON pay.target_id = inv.id ORDER BY balance DESC" --workspace my-ws
+# CTE joining documents with relationships
+rekor sql "WITH inv AS (SELECT id, data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents FINAL WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false), pay AS (SELECT target_id, sum(CAST(data.allocated, 'Float64')) as paid FROM relationships FINAL WHERE database_id = {database_id:String} AND rel_type = 'payment_for' AND deleted = false GROUP BY target_id) SELECT inv.num, inv.total, coalesce(pay.paid, 0) as paid, inv.total - coalesce(pay.paid, 0) as balance FROM inv LEFT JOIN pay ON pay.target_id = inv.id ORDER BY balance DESC" --database my-ws
 
 # With parameters
-rekor sql "SELECT * FROM records FINAL WHERE workspace_id = {workspace_id:String} AND data.status.:String = {status:String} AND deleted = false" --workspace my-ws --param status=issued
+rekor sql "SELECT * FROM documents FINAL WHERE database_id = {database_id:String} AND data.status.:String = {status:String} AND deleted = false" --database my-ws --param status=issued
 ```
 
 ### Relationships
 
 ```bash
-rekor relationships upsert --workspace <ws> --source <col/id> --target <col/id> --type <type> [--id <id>] [--data <json>]
-rekor relationships get <id> --workspace <ws>
-rekor relationships delete <id> --workspace <ws>
-rekor query-relationships <collection> <id> --workspace <ws> [--type <type>] [--direction outgoing|incoming|both]
+rekor relationships upsert --database <ws> --source <col/id> --target <col/id> --type <type> [--id <id>] [--data <json>]
+rekor relationships get <id> --database <ws>
+rekor relationships delete <id> --database <ws>
+rekor query-relationships <collection> <id> --database <ws> [--type <type>] [--direction outgoing|incoming|both]
 ```
 
 ### Hooks (inbound webhooks)
@@ -256,40 +256,40 @@ rekor query-relationships <collection> <id> --workspace <ws> [--type <type>] [--
 External systems push data into Rekor via hooks. Each hook provides a unique ingest URL.
 
 ```bash
-rekor hooks create --workspace <ws> --name <name> --collection <collection>
-rekor hooks list --workspace <ws>
-rekor hooks get <id> --workspace <ws>
-rekor hooks delete <id> --workspace <ws>
+rekor hooks create --database <ws> --name <name> --collection <collection>
+rekor hooks list --database <ws>
+rekor hooks get <id> --database <ws>
+rekor hooks delete <id> --database <ws>
 ```
 
-Hooks can only be created/deleted in preview workspaces. Promote to production when ready.
+Hooks can only be created/deleted in preview databases. Promote to production when ready.
 
 ### Triggers (outbound webhooks)
 
-Triggers fire automatically when records change, notifying external systems via HTTP POST.
+Triggers fire automatically when documents change, notifying external systems via HTTP POST.
 
 ```bash
-rekor triggers create --workspace <ws> --name <name> --collection <collection> --url <url> --events '["create","update","delete"]'
-rekor triggers list --workspace <ws>
-rekor triggers get <id> --workspace <ws>
-rekor triggers delete <id> --workspace <ws>
+rekor triggers create --database <ws> --name <name> --collection <collection> --url <url> --events '["create","update","delete"]'
+rekor triggers list --database <ws>
+rekor triggers get <id> --database <ws>
+rekor triggers delete <id> --database <ws>
 ```
 
-Triggers are HMAC-signed (`X-Rekor-Signature`) and fire asynchronously. By default, writes from hooks don't re-fire triggers (`skip_hook_writes: true`). Triggers can only be created/deleted in preview workspaces.
+Triggers are HMAC-signed (`X-Rekor-Signature`) and fire asynchronously. By default, writes from hooks don't re-fire triggers (`skip_hook_writes: true`). Triggers can only be created/deleted in preview databases.
 
 ### Batch (atomic)
 
 Execute up to 1,000 operations atomically — all succeed or all fail:
 
 ```bash
-rekor batch --workspace <ws> --operations '[
-  {"type":"upsert_record","collection":"invoices","data":{"customer":"A","amount":100}},
-  {"type":"upsert_record","collection":"invoices","data":{"customer":"B","amount":200}},
+rekor batch --database <ws> --operations '[
+  {"type":"upsert_document","collection":"invoices","data":{"customer":"A","amount":100}},
+  {"type":"upsert_document","collection":"invoices","data":{"customer":"B","amount":200}},
   {"type":"upsert_relationship","rel_type":"related_to","source_collection":"invoices","source_id":"id1","target_collection":"invoices","target_id":"id2"}
 ]'
 ```
 
-Operation types: `upsert_record`, `delete_record`, `upsert_relationship`, `delete_relationship`, `upsert_collection`, `delete_collection`
+Operation types: `upsert_document`, `delete_document`, `upsert_relationship`, `delete_relationship`, `upsert_collection`, `delete_collection`
 
 ### Provider Adapters
 
@@ -299,36 +299,36 @@ Import tool definitions from any LLM provider as collections, or export collecti
 
 ```bash
 # OpenAI
-rekor providers import openai --workspace <ws> --tools '[{"type":"function","function":{"name":"create_invoice","parameters":{"type":"object","properties":{"customer":{"type":"string"},"amount":{"type":"number"}},"required":["customer"]}}}]'
+rekor providers import openai --database <ws> --tools '[{"type":"function","function":{"name":"create_invoice","parameters":{"type":"object","properties":{"customer":{"type":"string"},"amount":{"type":"number"}},"required":["customer"]}}}]'
 
 # Anthropic
-rekor providers import anthropic --workspace <ws> --tools '[{"name":"create_invoice","input_schema":{"type":"object","properties":{"customer":{"type":"string"}}}}]'
+rekor providers import anthropic --database <ws> --tools '[{"name":"create_invoice","input_schema":{"type":"object","properties":{"customer":{"type":"string"}}}}]'
 
 # MCP
-rekor providers import mcp --workspace <ws> --tools '[{"name":"create_invoice","inputSchema":{"type":"object","properties":{"customer":{"type":"string"}}}}]'
+rekor providers import mcp --database <ws> --tools '[{"name":"create_invoice","inputSchema":{"type":"object","properties":{"customer":{"type":"string"}}}}]'
 
 # From file
-rekor providers import openai --workspace <ws> --tools @tools.json
+rekor providers import openai --database <ws> --tools @tools.json
 ```
 
 **Export** (get collections as tool definitions):
 
 ```bash
-rekor providers export openai --workspace <ws>
-rekor providers export anthropic --workspace <ws> --collections invoices,customers
-rekor providers export mcp --workspace <ws> --output tools.json
+rekor providers export openai --database <ws>
+rekor providers export anthropic --database <ws> --collections invoices,customers
+rekor providers export mcp --database <ws> --output tools.json
 ```
 
-**Import tool call** (create a record from provider-native format):
+**Import tool call** (create a document from provider-native format):
 
 ```bash
-# OpenAI tool call → record
-rekor providers import-call openai invoices --workspace <ws> \
+# OpenAI tool call → document
+rekor providers import-call openai invoices --database <ws> \
   --data '{"arguments":{"customer":"Acme","amount":5000}}' \
   --external-id call_abc123 --external-source openai
 
-# Anthropic tool call → record
-rekor providers import-call anthropic invoices --workspace <ws> \
+# Anthropic tool call → document
+rekor providers import-call anthropic invoices --database <ws> \
   --data '{"input":{"customer":"Acme","amount":5000}}'
 ```
 
@@ -336,11 +336,11 @@ Supported providers: `openai`, `anthropic`, `google`, `mcp`
 
 ### MCP Factory (custom MCP endpoints)
 
-Create purpose-built MCP servers from your workspace collections. Each endpoint serves domain-specific tools — agents see `create_invoice`, `list_payments`, not generic Rekor operations.
+Create purpose-built MCP servers from your database collections. Each endpoint serves domain-specific tools — agents see `create_invoice`, `list_payments`, not generic Rekor operations.
 
 ```bash
 # Create a curated MCP endpoint
-rekor endpoints upsert invoicing-agent --workspace my-ws \
+rekor endpoints upsert invoicing-agent --database my-ws \
   --name "Invoicing Agent" \
   --tool "invoices:get,list" \
   --tool "payments:create,get,list" \
@@ -353,13 +353,13 @@ rekor endpoints url invoicing-agent
 # → https://mcp.rekor.pro/e/invoicing-agent/mcp
 
 # List all endpoints
-rekor endpoints list --workspace my-ws
+rekor endpoints list --database my-ws
 
 # Get endpoint config (with resolved schemas)
-rekor endpoints get invoicing-agent --workspace my-ws --resolved
+rekor endpoints get invoicing-agent --database my-ws --resolved
 
 # Delete an endpoint
-rekor endpoints delete invoicing-agent --workspace my-ws
+rekor endpoints delete invoicing-agent --database my-ws
 ```
 
 **Tool spec format**: `collection:op1,op2` (operations: `create`, `get`, `list`, `update`, `delete`)
@@ -369,7 +369,7 @@ rekor endpoints delete invoicing-agent --workspace my-ws
 **Custom tool names and descriptions**: Use `--config` with full JSON for advanced control:
 
 ```bash
-rekor endpoints upsert invoicing-agent --workspace my-ws --config '{
+rekor endpoints upsert invoicing-agent --database my-ws --config '{
   "name": "Invoicing Agent",
   "tools": [
     {
@@ -381,7 +381,7 @@ rekor endpoints upsert invoicing-agent --workspace my-ws --config '{
     {
       "collection": "payments",
       "operations": ["create", "get", "list"],
-      "description_override": "Manage payment records for invoices"
+      "description_override": "Manage payment documents for invoices"
     }
   ],
   "relationships": [
@@ -398,25 +398,25 @@ rekor endpoints upsert invoicing-agent --workspace my-ws --config '{
 
 Or from a file: `--config @endpoint.json`
 
-Connect agents to the endpoint URL with a token scoped to exactly one workspace. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts.
+Connect agents to the endpoint URL with a token scoped to exactly one database. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts.
 
-Endpoints can only be created/modified in preview workspaces. Promote to production when ready.
+Endpoints can only be created/modified in preview databases. Promote to production when ready.
 
 ### API Tokens
 
-Create scoped tokens for agents, integrations, and CI/CD. Tokens can be restricted to specific workspaces, collections, environments, and permissions. Tokens are hashed before storage — the raw value is shown only once on creation.
+Create scoped tokens for agents, integrations, and CI/CD. Tokens can be restricted to specific databases, collections, environments, and permissions. Tokens are hashed before storage — the raw value is shown only once on creation.
 
 ```bash
 # Create a full-access token
-rekor tokens create --name "my-key" --grants '[{"scope":{"workspaces":["*"]},"permissions":["*"]}]'
+rekor tokens create --name "my-key" --grants '[{"scope":{"databases":["*"]},"permissions":["*"]}]'
 
-# Create a scoped token (read-only on one workspace)
+# Create a scoped token (read-only on one database)
 rekor tokens create --name "client-a-reader" \
-  --grants '[{"scope":{"workspaces":["client-a"],"environments":["production"]},"permissions":["read:records","read:collections"]}]'
+  --grants '[{"scope":{"databases":["client-a"],"environments":["production"]},"permissions":["read:documents","read:collections"]}]'
 
 # Create a token with expiration
 rekor tokens create --name "temp-key" \
-  --grants '[{"scope":{"workspaces":["*"]},"permissions":["*"]}]' \
+  --grants '[{"scope":{"databases":["*"]},"permissions":["*"]}]' \
   --expires-at 2026-12-31T23:59:59Z
 
 # List tokens (shows status, last_used_at, expires_at)
@@ -426,9 +426,9 @@ rekor tokens list
 rekor tokens revoke <token_id>
 ```
 
-**Permissions**: `read:records`, `write:records`, `read:collections`, `write:collections`, `read:relationships`, `write:relationships`, `read:attachments`, `write:attachments`, `read:hooks`, `write:hooks`, `read:triggers`, `write:triggers`, `read:endpoints`, `write:endpoints`, `read:workspaces`, `write:workspaces`, or `*` for all.
+**Permissions**: `read:documents`, `write:documents`, `read:collections`, `write:collections`, `read:relationships`, `write:relationships`, `read:attachments`, `write:attachments`, `read:hooks`, `write:hooks`, `read:triggers`, `write:triggers`, `read:endpoints`, `write:endpoints`, `read:databases`, `write:databases`, or `*` for all.
 
-**Scope fields**: `workspaces` (required), `collections` (optional — omit for all), `environments` (optional — `production`, `preview`, or omit for both).
+**Scope fields**: `databases` (required), `collections` (optional — omit for all), `environments` (optional — `production`, `preview`, or omit for both).
 
 Tokens enforce a privilege ceiling — you can only create tokens with equal or narrower scope than your own.
 
@@ -439,7 +439,7 @@ Tokens enforce a privilege ceiling — you can only create tokens with equal or 
 Add `--output json` for machine-readable JSON output (default is `table`).
 
 ```bash
-rekor records get invoices rec_abc --workspace my-ws --output json
+rekor documents get invoices rec_abc --database my-ws --output json
 ```
 
 ## Data Input
@@ -450,29 +450,29 @@ Any `--data`, `--schema`, `--tools`, or `--operations` flag accepts:
 
 ## Environments
 
-Workspaces are either **production** or **preview**. As an agent, you can:
+Databases are either **production** or **preview**. As an agent, you can:
 
-- **Read** from any workspace (production or preview)
-- **Write records and relationships** to any workspace
-- **Modify schemas** (collections, triggers, hooks) only in preview workspaces
+- **Read** from any database (production or preview)
+- **Write documents and relationships** to any database
+- **Modify schemas** (collections, triggers, hooks) only in preview databases
 
-To modify schemas, create a preview workspace first:
+To modify schemas, create a preview database first:
 
 ```bash
-rekor workspaces create-preview my-workspace --name "add-invoices"
+rekor databases create-preview my-database --name "add-invoices"
 ```
 
-Then work in the preview workspace:
+Then work in the preview database:
 
 ```bash
-rekor collections upsert invoices --workspace my-workspace--add-invoices \
+rekor collections upsert invoices --database my-database--add-invoices \
   --schema '{"type":"object","properties":{"amount":{"type":"number"}}}'
 ```
 
 When you're done, ask a human operator to promote your changes:
 
 ```
-# Human runs: rekor workspaces promote my-workspace --from my-workspace--add-invoices
+# Human runs: rekor databases promote my-database --from my-database--add-invoices
 ```
 
 **Promotion is a human-only operation.** You cannot promote directly. Always work in preview for schema changes.
@@ -480,11 +480,11 @@ When you're done, ask a human operator to promote your changes:
 ## Best Practices
 
 - **Use external IDs** for idempotent upserts — retry-safe, no duplicates.
-- **One workspace per context** — keeps data isolated (per test run, per agent, per environment).
-- **Preview for schema changes** — modify collections, triggers, hooks in a preview workspace. Ask a human to promote.
+- **One database per context** — keeps data isolated (per test run, per agent, per environment).
+- **Preview for schema changes** — modify collections, triggers, hooks in a preview database. Ask a human to promote.
 - **Batch for atomicity** — when multiple writes must succeed or fail together.
-- **Relationships over nested data** — link records instead of embedding. Enables traversal and flexible queries.
-- **Schema first** — define the collection schema before writing records. Validation catches bad data early.
-- **Query delay after writes** — single-record reads (`records get`, `relationships get`) reflect writes immediately; `sql` and `query-relationships` may take a moment to catch up. If you need to query right after writing, wait briefly or use direct gets.
+- **Relationships over nested data** — link documents instead of embedding. Enables traversal and flexible queries.
+- **Schema first** — define the collection schema before writing documents. Validation catches bad data early.
+- **Query delay after writes** — single-document reads (`documents get`, `relationships get`) reflect writes immediately; `sql` and `query-relationships` may take a moment to catch up. If you need to query right after writing, wait briefly or use direct gets.
 - **Set token expiration** — use `--expires-at` for short-lived tokens. Revoke unused tokens promptly.
 - **Save tokens immediately** — the raw token is shown only once on creation. Store it securely before closing the terminal.

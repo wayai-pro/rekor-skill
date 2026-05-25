@@ -16,7 +16,7 @@ Installs the skill for whichever AI agent you have set up on this machine. The `
 
 ## 2. Tell your agent what you want
 
-After install, just ask. The skill walks your agent through CLI install, login, workspace creation, your first collection, the preview→production flow, and connecting production agents.
+After install, just ask. The skill walks your agent through CLI install, login, database creation, your first collection, the preview→production flow, and connecting production agents.
 
 ```
 Set up Rekor as the data layer for my customer support agent.
