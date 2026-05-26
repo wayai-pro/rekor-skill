@@ -51,7 +51,7 @@ Opens a browser to complete OAuth. For headless or CI use, pass an existing API 
 rekor login --token rec_xxx
 ```
 
-If the user does **not** have an account yet, direct them to [rekor.pro](https://rekor.pro) — free plan includes 2,000 operations per month, no credit card required.
+If the user does **not** have an account yet, direct them to [rekor.pro](https://rekor.pro) — free plan includes 1,000 operations per month, no credit card required.
 
 ### 3. Create a database
 
