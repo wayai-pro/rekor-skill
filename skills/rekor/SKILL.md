@@ -91,7 +91,7 @@ Write some test documents to the preview, query them, iterate until the schema i
 
 ```bash
 rekor documents upsert <slug> --database <id>--<preview-slug> --data '{...}'
-rekor sql "SELECT * FROM documents FINAL WHERE database_id = {database_id:String} AND collection = '<slug>' AND deleted = false" --database <id>--<preview-slug>
+rekor sql "SELECT * FROM documents WHERE database_id = {database_id:String} AND collection = '<slug>' AND deleted = false" --database <id>--<preview-slug>
 ```
 
 When ready, surface the promotion command for the user to run (you cannot promote yourself):
@@ -155,7 +155,7 @@ rekor documents upsert invoices --database my-ws \
 ### 3. Query documents
 
 ```bash
-rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents FINAL WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false ORDER BY total DESC" --database my-ws
+rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false ORDER BY total DESC" --database my-ws
 ```
 
 ### 4. Link documents
@@ -216,7 +216,7 @@ rekor sql "<query>" --database <ws> [--param key=value ...] [--file query.sql]
 
 **Tables**: `documents`, `relationships`, `collections`, `databases`, `operations_log`
 
-**Important**: Always include `database_id = {database_id:String}`, `deleted = false`, and `FINAL` after table names.
+**Important**: Always include `database_id = {database_id:String}` and `deleted = false`. Queries always see the latest version of each row — the server handles deduplication.
 
 **Accessing JSON fields**: Use `data.field.:Type` subcolumn syntax for the native JSON type. Use `CAST(data.field, 'Type')` when type-safe conversion is needed (e.g., integers stored as Int64 vs Float64).
 
@@ -224,22 +224,22 @@ rekor sql "<query>" --database <ws> [--param key=value ...] [--file query.sql]
 
 ```bash
 # Simple query
-rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status FROM documents FINAL WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false" --database my-ws
+rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status FROM documents WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false" --database my-ws
 
 # Aggregation
-rekor sql "SELECT data.status.:String as status, count() as cnt FROM documents FINAL WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY status" --database my-ws
+rekor sql "SELECT data.status.:String as status, count() as cnt FROM documents WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY status" --database my-ws
 
 # Array aggregation (sum embedded line items)
-rekor sql "SELECT data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents FINAL WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false" --database my-ws
+rekor sql "SELECT data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false" --database my-ws
 
 # Explode array elements with ARRAY JOIN
-rekor sql "SELECT item.description.:String as item, sum(CAST(item.amount, 'Float64')) as revenue FROM documents FINAL ARRAY JOIN data.line_items[] as item WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY item ORDER BY revenue DESC" --database my-ws
+rekor sql "SELECT item.description.:String as item, sum(CAST(item.amount, 'Float64')) as revenue FROM documents ARRAY JOIN data.line_items[] as item WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY item ORDER BY revenue DESC" --database my-ws
 
 # CTE joining documents with relationships
-rekor sql "WITH inv AS (SELECT id, data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents FINAL WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false), pay AS (SELECT target_id, sum(CAST(data.allocated, 'Float64')) as paid FROM relationships FINAL WHERE database_id = {database_id:String} AND rel_type = 'payment_for' AND deleted = false GROUP BY target_id) SELECT inv.num, inv.total, coalesce(pay.paid, 0) as paid, inv.total - coalesce(pay.paid, 0) as balance FROM inv LEFT JOIN pay ON pay.target_id = inv.id ORDER BY balance DESC" --database my-ws
+rekor sql "WITH inv AS (SELECT id, data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false), pay AS (SELECT target_id, sum(CAST(data.allocated, 'Float64')) as paid FROM relationships WHERE database_id = {database_id:String} AND rel_type = 'payment_for' AND deleted = false GROUP BY target_id) SELECT inv.num, inv.total, coalesce(pay.paid, 0) as paid, inv.total - coalesce(pay.paid, 0) as balance FROM inv LEFT JOIN pay ON pay.target_id = inv.id ORDER BY balance DESC" --database my-ws
 
 # With parameters
-rekor sql "SELECT * FROM documents FINAL WHERE database_id = {database_id:String} AND data.status.:String = {status:String} AND deleted = false" --database my-ws --param status=issued
+rekor sql "SELECT * FROM documents WHERE database_id = {database_id:String} AND data.status.:String = {status:String} AND deleted = false" --database my-ws --param status=issued
 ```
 
 ### Relationships
