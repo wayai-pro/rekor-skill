@@ -177,6 +177,8 @@ rekor query-relationships invoices rec_abc --database my-ws \
 
 ## Full Command Reference
 
+> Destructive `delete` commands prompt for confirmation in an interactive terminal. Pass `-y`/`--yes` to skip the prompt (it is also auto-skipped in non-interactive/CI contexts).
+
 ### Databases
 
 ```bash
@@ -431,6 +433,16 @@ rekor tokens revoke <token_id>
 **Scope fields**: `databases` (required), `collections` (optional — omit for all), `environments` (optional — `production`, `preview`, or omit for both).
 
 Tokens enforce a privilege ceiling — you can only create tokens with equal or narrower scope than your own.
+
+### Account & Diagnostics
+
+```bash
+rekor whoami                 # Show the authenticated identity
+rekor status                 # Auth, connectivity, and CLI version diagnostics
+rekor update                 # Update the CLI to the latest published version
+```
+
+The CLI checks for a newer published version in the background and prints a one-line notice when an update is available. Disable the check with `REKOR_NO_UPDATE_CHECK=1` (also disabled when `NO_UPDATE_NOTIFIER` or `CI` is set).
 
 ---
 
