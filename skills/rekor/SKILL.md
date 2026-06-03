@@ -282,6 +282,25 @@ Add `--filter '<json>'` to fire only on documents matching a condition — the s
 
 Triggers are HMAC-signed (`X-Rekor-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Rekor-Timestamp` the receiver checks for freshness — the same scheme proxied requests use) and carry `X-Rekor-Id`/`X-Rekor-Delivery-Id` for receiver dedupe. Delivery is reliable — failed attempts are retried with backoff and dead-lettered after repeated failure; inspect status with `rekor triggers deliveries`. By default, writes from hooks don't re-fire triggers (`skip_hook_writes: true`). Triggers can only be created/deleted in preview databases.
 
+### Executors (acting on the outside world)
+
+Rekor records, signs, and dispatches — but the actual outside-world action (calling a third-party API, presenting a client certificate, running logic Rekor can't) happens in an **executor**: a small, stateless HTTP service you deploy and point a trigger or external source at. Rekor signs every dispatched request; the executor verifies it, does the work, and writes the result back.
+
+**Always receive these requests with the `rekor-sdk` package — never hand-roll signature verification** (a mistake lets anyone forge a request to your executor). The SDK verifies the signature + timestamp, dedupes retries on the idempotency key, and normalizes errors — you write one handler:
+
+```ts
+import { createExecutor, toFetchHandler } from 'rekor-sdk'
+const handler = toFetchHandler(createExecutor({
+  secret: process.env.REKOR_SIGNING_SECRET!,
+  handler: async (ctx) => { /* ctx.body is verified; do the work, return a result or nothing */ },
+}))
+// Hono: app.post('/rekor', (c) => handler(c.req.raw))  •  Cloudflare: export default { fetch: handler }
+```
+
+**Where to run it:** default to a **Cloudflare Worker** — most executors are just authenticated API calls, and a Worker is cheap, fast, and globally deployed. Reach for **Fly.io (or any container)** only when a Worker can't do the job: mutual-TLS client certificates, long-running work, raw TCP/SOAP, or native dependencies.
+
+For the full contract, framework variants, the certificate-via-vault pattern, and local dev, read `references/executors.md` (bundled alongside this skill).
+
 ### Batch (atomic)
 
 Execute up to 1,000 operations atomically — all succeed or all fail:
