@@ -275,9 +275,10 @@ rekor triggers create --database <ws> --name <name> --collection <collection> --
 rekor triggers list --database <ws>
 rekor triggers get <id> --database <ws>
 rekor triggers delete <id> --database <ws>
+rekor triggers deliveries --database <ws> [--status <pending|delivered|failed|dead>] [--trigger-id <id>]
 ```
 
-Triggers are HMAC-signed (`X-Rekor-Signature`) and fire asynchronously. By default, writes from hooks don't re-fire triggers (`skip_hook_writes: true`). Triggers can only be created/deleted in preview databases.
+Triggers are HMAC-signed (`X-Rekor-Signature`) and carry an `X-Rekor-Delivery-Id` for receiver dedupe. Delivery is reliable — failed attempts are retried with backoff and dead-lettered after repeated failure; inspect status with `rekor triggers deliveries`. By default, writes from hooks don't re-fire triggers (`skip_hook_writes: true`). Triggers can only be created/deleted in preview databases.
 
 ### Batch (atomic)
 
