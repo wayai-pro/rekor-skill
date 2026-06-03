@@ -456,6 +456,23 @@ rekor tokens revoke <token_id>
 
 Tokens enforce a privilege ceiling — you can only create tokens with equal or narrower scope than your own.
 
+### Secrets (vault)
+
+Store credentials at the organization level — API keys, signing secrets, or credential-grade blobs (a client certificate, keystore, or service-account JSON). Secrets are encrypted at rest and always masked in responses. Reference them from source/trigger config (e.g. an executor's signing secret) or have an executor read one at runtime.
+
+```bash
+# Store a string secret
+rekor secrets create --name stripe-key --value sk_live_xxx --tags billing
+
+# Store a credential file (base64-encoded) with its type — e.g. a client certificate
+rekor secrets create --name partner-cert --file ./partner.p12 --content-type application/x-pkcs12
+
+rekor secrets list                         # List (values masked)
+rekor secrets get <id>                      # Metadata (value masked)
+rekor secrets rotate <id> --value <new>     # Install a new value (rotation never auto-generates)
+rekor secrets delete <id>
+```
+
 ### Account & Diagnostics
 
 ```bash

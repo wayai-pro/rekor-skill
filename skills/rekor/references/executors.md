@@ -92,12 +92,9 @@ When an upstream requires a client certificate, store it in Rekor's vault (base6
 `content_type` so it's a first-class, rotatable credential — not a file baked into the executor:
 
 ```bash
-# The vault is managed over the REST API (account-level endpoint). Store the cert as a
-# credential-grade secret — base64 of the .p12 / .pem — with a content_type:
-curl -X POST "$REKOR_API_URL/v1/vault/secrets" \
-  -H "Authorization: Bearer $REKOR_TOKEN" \
-  -H 'content-type: application/json' \
-  -d '{"name":"partner-cert","value":"<base64-cert>","content_type":"application/x-pkcs12"}'
+# Store the cert as a credential-grade secret. `--file` reads the .p12 / .pem and base64-encodes it;
+# `--content-type` records the format so consumers know how to use it.
+rekor secrets create --name partner-cert --file ./partner.p12 --content-type application/x-pkcs12
 ```
 
 Rekor injects vault secrets into proxied requests, or the executor fetches the secret at startup and
