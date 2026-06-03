@@ -278,6 +278,8 @@ rekor triggers delete <id> --database <ws>
 rekor triggers deliveries --database <ws> [--status <pending|delivered|failed|dead>] [--trigger-id <id>]
 ```
 
+Add `--filter '<json>'` to fire only on documents matching a condition — the same filter DSL queries use, evaluated against the document (or relationship) being written, e.g. `--filter '{"field":"data.status","op":"eq","value":"paid"}'` fires only when `status` is `paid`. Combine conditions with `and`/`or` groups. A malformed filter is rejected at create time.
+
 Triggers are HMAC-signed (`X-Rekor-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Rekor-Timestamp` the receiver checks for freshness — the same scheme proxied requests use) and carry `X-Rekor-Id`/`X-Rekor-Delivery-Id` for receiver dedupe. Delivery is reliable — failed attempts are retried with backoff and dead-lettered after repeated failure; inspect status with `rekor triggers deliveries`. By default, writes from hooks don't re-fire triggers (`skip_hook_writes: true`). Triggers can only be created/deleted in preview databases.
 
 ### Batch (atomic)
