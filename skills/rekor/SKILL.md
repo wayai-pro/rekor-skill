@@ -496,6 +496,7 @@ When you're done, ask a human operator to promote your changes:
 - **Preview for schema changes** — modify collections, triggers, hooks in a preview database. Ask a human to promote.
 - **Batch for atomicity** — when multiple writes must succeed or fail together.
 - **Relationships over nested data** — link documents instead of embedding. Enables traversal and flexible queries.
+- **Attachments for large or binary content** — document data and relationship metadata are for structured JSON and are capped at ~1 MiB. Store PDFs, images, and other files as attachments (`rekor attachments upload <collection> <id> --filename <name> --file <path>`) and reference them from the document; inlining base64 blobs is rejected.
 - **Schema first** — define the collection schema before writing documents. Validation catches bad data early.
 - **Query delay after writes** — single-document reads (`documents get`, `relationships get`) reflect writes immediately; `sql` and `query-relationships` may take a moment to catch up. If you need to query right after writing, wait briefly or use direct gets.
 - **Set token expiration** — use `--expires-at` for short-lived tokens. Revoke unused tokens promptly.
