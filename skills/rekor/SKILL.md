@@ -406,6 +406,7 @@ Each source defines:
 - `cache_ttl` (seconds) + `stale_if_error` — read-through caching, optionally serving the last-known value on a transient upstream failure.
 - `signing` — opt into HMAC request signing when the source points at an executor (adds `X-Rekor-Signature` + `X-Rekor-Timestamp`); omit for third-party APIs.
 - `timeout_ms` — per-request upstream timeout (default 10s, max 30s); a timeout surfaces as a transient error so `stale_if_error` can serve a cached value.
+- `breaker` — per-source circuit breaker: `{failure_threshold, cooldown_ms}`. After `failure_threshold` consecutive transient failures (default 5) the source opens and short-circuits calls for `cooldown_ms` (default 30s) before a single half-open probe. Always on; this only tunes it.
 
 URLs must be absolute `https` and tokens may appear only in the path/query (never the host) — an SSRF guard rejects otherwise.
 
