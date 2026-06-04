@@ -4,10 +4,12 @@ description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
   collection, working in preview and promoting to production, querying documents via SQL,
-  managing relationships, configuring hooks/triggers/batch operations, importing or
-  exporting tool definitions across providers (OpenAI/Anthropic/Google/MCP), creating
-  curated MCP Factory endpoints, scoping API tokens, or interpreting Rekor concepts
-  (database, collection, document, relationship, preview/production, external_id).
+  managing relationships, uploading file attachments, configuring hooks/triggers/batch
+  operations, backing a collection with an external API (external sources), storing
+  credentials in the secret vault, importing or exporting tool definitions across
+  providers (OpenAI/Anthropic/Google/MCP), creating curated MCP Factory endpoints,
+  scoping API tokens, or interpreting Rekor concepts (database, collection, document,
+  relationship, preview/production, external_id).
 ---
 
 # Rekor — Data Layer for AI Agents
@@ -187,18 +189,25 @@ rekor databases get <id>
 rekor databases create <id> --name <name> [--description <desc>] [--tags <comma-separated>]
 rekor databases tag <id> --tags <comma-separated>
 rekor databases delete <id>
+rekor databases create-preview <prod-id> --name <preview-slug> [--description <desc>]
+rekor databases list-previews <prod-id>
+rekor databases promote <prod-id> --from <preview-id> [--dry-run] [--collections <ids>] [--triggers <ids>] [--hooks <ids>]
+rekor databases promotions <prod-id>
+rekor databases rollback <prod-id> --promotion <promotion-id>
 ```
 
-Tags let you group databases (e.g., `client:acme,billing`). Filter with `--tag`.
+Tags let you group databases (e.g., `client:acme,billing`). Filter with `--tag`. Promotion is **human-only** (see Environments). Promote selectively with `--collections`/`--triggers`/`--hooks` (omit to promote everything). `promotions` lists prior promotions; `rollback` reverts one by ID.
 
 ### Collections
 
 ```bash
 rekor collections list --database <ws>
 rekor collections get <id> --database <ws>
-rekor collections upsert <id> --database <ws> --name <name> --schema <json|@file>
+rekor collections upsert <id> --database <ws> --name <name> --schema <json|@file> [--description <desc>] [--icon <name>] [--color <hex>] [--sources <json|@file>]
 rekor collections delete <id> --database <ws>
 ```
+
+`--icon`/`--color` are display hints for the inspection UI. `--sources` declares **external sources** — see the External Sources section below.
 
 ### Documents
 
@@ -208,6 +217,21 @@ rekor documents get <collection> <id> --database <ws>
 rekor documents delete <collection> <id> --database <ws>
 ```
 
+**Cancellation & archival.** A document can be *cancelled* — a first-class state distinct from delete — via MCP (`manage_document` `cancel`) or REST (`POST .../documents/<collection>/<id>/cancel`); there is no CLI `cancel` subcommand. A cancelled document can no longer be updated. Documents may also be *archived* automatically per a collection's archival policy (e.g. once they reach a terminal or immutable state, which itself blocks further updates). An archived document stays readable and can still be cancelled, but it can't be deleted, and re-upserting by the same `external_id` creates a **new** document rather than updating the archived one. When querying with `rekor sql`, add `archived = false` to see only active documents (cancelled rows carry `cancelled = true`).
+
+### Attachments
+
+Store large or binary content (PDFs, images, files) as attachments on a document and reference them from the document data — document/relationship JSON is for structured data and is capped at ~1 MiB, so inlining base64 blobs is rejected. Filenames may contain paths for folder structure (e.g. `docs/guide.md`).
+
+```bash
+rekor attachments upload <collection> <id> --database <ws> --filename <name> [--content-type <mime>] [--file <path>]
+rekor attachments url <collection> <id> --database <ws> --filename <name>
+rekor attachments list <collection> <id> --database <ws> [--prefix <path>]
+rekor attachments delete <collection> <id> <attachment-id> --database <ws>
+```
+
+`upload` with `--file` uploads the local file directly; without `--file`, `upload` returns a presigned URL you `PUT` the bytes to. `url` returns a **download** URL for fetching an existing attachment. `--prefix` filters `list` to a path prefix (e.g. `docs/`).
+
 ### SQL Query
 
 Execute read-only SQL queries directly against database data. Supports filtering, aggregation, JOINs, CTEs, and array operations.
@@ -216,9 +240,11 @@ Execute read-only SQL queries directly against database data. Supports filtering
 rekor sql "<query>" --database <ws> [--param key=value ...] [--file query.sql]
 ```
 
-**Tables**: `documents`, `relationships`, `collections`, `databases`, `operations_log`
+**Tables**: `documents`, `relationships`, `collections`, `databases`, `operations_log`, `organization`
 
-**Important**: Always include `database_id = {database_id:String}` and `deleted = false`. Queries always see the latest version of each row — the server handles deduplication.
+The `organization` table exposes org-level metadata (e.g. plan/status) and requires an `{org_id:String}` predicate instead of `{database_id:String}`.
+
+**Important**: Always include `database_id = {database_id:String}` and `deleted = false`. The `documents` table also carries `archived` and `cancelled` boolean columns — add `archived = false` to query only active documents. Queries always see the latest version of each row — the server handles deduplication.
 
 **Accessing JSON fields**: Use `data.field.:Type` subcolumn syntax for the native JSON type. Use `CAST(data.field, 'Type')` when type-safe conversion is needed (e.g., integers stored as Int64 vs Float64).
 
@@ -250,7 +276,7 @@ rekor sql "SELECT * FROM documents WHERE database_id = {database_id:String} AND 
 rekor relationships upsert --database <ws> --source <col/id> --target <col/id> --type <type> [--id <id>] [--data <json>]
 rekor relationships get <id> --database <ws>
 rekor relationships delete <id> --database <ws>
-rekor query-relationships <collection> <id> --database <ws> [--type <type>] [--direction outgoing|incoming|both]
+rekor query-relationships <collection> <id> --database <ws> [--type <type>] [--direction outgoing|incoming|both] [--limit <n>] [--offset <n>]
 ```
 
 ### Hooks (inbound webhooks)
@@ -258,25 +284,27 @@ rekor query-relationships <collection> <id> --database <ws> [--type <type>] [--d
 External systems push data into Rekor via hooks. Each hook provides a unique ingest URL.
 
 ```bash
-rekor hooks create --database <ws> --name <name> --collection <collection>
+rekor hooks create --database <ws> --name <name> --secret <hmac-secret> [--id <id>] [--collection-scope <comma-separated>]
 rekor hooks list --database <ws>
 rekor hooks get <id> --database <ws>
 rekor hooks delete <id> --database <ws>
 ```
 
-Hooks can only be created/deleted in preview databases. Promote to production when ready.
+`--secret` is the HMAC shared secret the sender signs ingest requests with (required). `--collection-scope` restricts which collections the hook may write to (omit for all). Hooks can only be created/deleted in preview databases. Promote to production when ready.
 
 ### Triggers (outbound webhooks)
 
 Triggers fire automatically when documents change, notifying external systems via HTTP POST.
 
 ```bash
-rekor triggers create --database <ws> --name <name> --collection <collection> --url <url> --events '["create","update","delete"]'
+rekor triggers create --database <ws> --name <name> --url <url> --secret <hmac-secret> --events <comma-separated> [--id <id>] [--collection-scope <comma-separated>] [--filter <json>]
 rekor triggers list --database <ws>
 rekor triggers get <id> --database <ws>
 rekor triggers delete <id> --database <ws>
 rekor triggers deliveries --database <ws> [--status <pending|delivered|failed|dead>] [--trigger-id <id>]
 ```
+
+`--events` is a **comma-separated** list (not a JSON array). Valid events: `document.created`, `document.updated`, `document.deleted`, `document.cancelled`, `relationship.created`, `relationship.updated`, `relationship.deleted` — e.g. `--events document.created,document.updated`. (Bare names like `create`/`update` will silently never match.) `--secret` (required) is the HMAC signing secret receivers verify with. `--collection-scope` limits firing to specific collections (omit for all).
 
 Add `--filter '<json>'` to fire only on documents matching a condition — the same filter DSL queries use, evaluated against the document (or relationship) being written, e.g. `--filter '{"field":"data.status","op":"eq","value":"paid"}'` fires only when `status` is `paid`. Combine conditions with `and`/`or` groups. A malformed filter is rejected at create time.
 
@@ -300,6 +328,29 @@ const handler = toFetchHandler(createExecutor({
 **Where to run it:** default to a **Cloudflare Worker** — most executors are just authenticated API calls, and a Worker is cheap, fast, and globally deployed. Reach for **Fly.io (or any container)** only when a Worker can't do the job: mutual-TLS client certificates, long-running work, raw TCP/SOAP, or native dependencies.
 
 For the full contract, framework variants, the certificate-via-vault pattern, and local dev, read `references/executors.md` (bundled alongside this skill).
+
+### External Sources (back a collection with an external API)
+
+A collection can declare one or more **external sources**. When a document operation carries an `external_source` that matches a configured source name, Rekor proxies that read/write to the external API (or an executor) instead of its own store — so an agent reads and writes `stripe`-backed invoices through the same `rekor documents`/MCP calls, with no separate integration code.
+
+Configure sources as part of the collection schema (preview only, promoted like any schema change):
+
+```bash
+rekor collections upsert invoices --database my-ws--preview --name "Invoices" \
+  --schema @schema.json --sources @sources.json
+```
+
+Each source defines:
+- `name` — must equal the document's `external_source`.
+- `auth` — header + value template; the secret can be inline or a `vault:<name>` reference.
+- `field_mapping` — `to_external` / `to_rekor` maps between your schema and the upstream's field names (simple renames or rich rules with value maps, transforms, defaults).
+- `get` / `list` / `create` / `update` / `delete` — per-operation endpoint templates (`url` with `{{external_id}}`, `{{query.*}}`, `{{data.*}}` tokens; `method`; `response_path` / `total_path` to extract the body).
+- `injections` — extra per-request vault secrets placed into a header or body field (for upstreams needing their own credential).
+- `cache_ttl` (seconds) + `stale_if_error` — read-through caching, optionally serving the last-known value on a transient upstream failure.
+- `signing` — opt into HMAC request signing when the source points at an executor (adds `X-Rekor-Signature` + `X-Rekor-Timestamp`); omit for third-party APIs.
+- `timeout_ms` — per-request upstream timeout (default 10s, max 30s); a timeout surfaces as a transient error so `stale_if_error` can serve a cached value.
+
+URLs must be absolute `https` and tokens may appear only in the path/query (never the host) — an SSRF guard rejects otherwise.
 
 ### Batch (atomic)
 
@@ -372,7 +423,7 @@ rekor endpoints upsert invoicing-agent --database my-ws \
   --batch "invoices:create,update" --batch "payments:create" --batch "invoice_payment:create" \
   --sql-query
 
-# Get the MCP connection URL
+# Get the MCP connection URL (add --transport sse for the SSE endpoint; default mcp)
 rekor endpoints url invoicing-agent
 # → https://mcp.rekor.pro/e/invoicing-agent/mcp
 
