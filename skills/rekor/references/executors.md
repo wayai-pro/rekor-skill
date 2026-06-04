@@ -71,7 +71,16 @@ key (so an at-least-once delivery never double-acts), and a normalized error env
   executor holds at most an ephemeral in-memory cache.
 - **Return the normalized error envelope** `{ status, code, message, retriable }` (throw `ExecutorError`).
 - **Keep secrets and PII out of logs.**
-- **Write results back** — return them inline (sync), or POST to a Rekor hook (async).
+- **Write results back** — return them inline (sync), or for a slow/async action POST the result to a
+  Rekor **hook**. Sign that write-back with the SDK's `signRequest` (the inverse of the verify side):
+
+  ```ts
+  import { signRequest } from 'rekor-sdk'
+  const url = 'https://api.rekor.pro/v1/<db>/hooks/<hook_id>/ingest'
+  const body = JSON.stringify({ collection: 'results', data: { /* ... */ } })
+  const headers = await signRequest({ secret: process.env.REKOR_HOOK_SECRET!, method: 'POST', url, body })
+  await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body })
+  ```
 
 ## Where to run it
 
