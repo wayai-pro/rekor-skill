@@ -346,6 +346,7 @@ Each source defines:
 - `field_mapping` — `to_external` / `to_rekor` maps between your schema and the upstream's field names (simple renames or rich rules with value maps, transforms, defaults).
 - `get` / `list` / `create` / `update` / `delete` — per-operation endpoint templates (`url` with `{{external_id}}`, `{{query.*}}`, `{{data.*}}` tokens; `method`; `response_path` / `total_path` to extract the body).
 - `injections` — extra per-request vault secrets placed into a header or body field (for upstreams needing their own credential).
+- `executor_secrets` — named vault credentials an executor pulls at dispatch, for a binary or large per-tenant credential it can't take inline (e.g. an mTLS client certificate). Each `{name, secret_ref}` declares a `vault:<name>` reference (templating only `{{auth.org_id}}`/`{{auth.database_id}}`); each pull is short-lived and single-use, scoped to the calling database.
 - `cache_ttl` (seconds) + `stale_if_error` — read-through caching, optionally serving the last-known value on a transient upstream failure.
 - `signing` — opt into HMAC request signing when the source points at an executor (adds `X-Rekor-Signature` + `X-Rekor-Timestamp`); omit for third-party APIs.
 - `timeout_ms` — per-request upstream timeout (default 10s, max 30s); a timeout surfaces as a transient error so `stale_if_error` can serve a cached value.
