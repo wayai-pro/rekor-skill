@@ -127,7 +127,8 @@ See the [MCP Factory](#mcp-factory-custom-mcp-endpoints) section below.
 
 - **Collection**: A schema (JSON Schema) that defines a document type. No migrations — create at runtime.
 - **Document**: A JSON document conforming to a collection's schema.
-- **Relationship**: A typed, directed link between two documents with optional metadata.
+- **Relationship type**: A schema (like a collection, but for links) that defines a `rel_type`. It optionally validates a relationship's metadata against a JSON Schema and optionally restricts which collections it may connect. Must exist before any relationship of that type can be created.
+- **Relationship**: A typed, directed link between two documents. Its `rel_type` must be a declared relationship type; its metadata is validated against that type's schema.
 
 ## Quick Start
 
@@ -160,13 +161,25 @@ rekor documents upsert invoices --database my-ws \
 rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false ORDER BY total DESC" --database my-ws
 ```
 
-### 4. Link documents
+### 4. Declare a relationship type, then link documents
+
+A relationship type must exist before linking. Declare it once (a config write — do this in a preview environment, then promote):
+
+```bash
+rekor relationship-types upsert belongs_to --database my-ws \
+  --description "Invoice belongs to a customer" \
+  --source-collections '["invoices"]' --target-collections '["customers"]'
+```
+
+Then link:
 
 ```bash
 rekor relationships upsert --database my-ws \
   --source invoices/rec_abc --target customers/rec_xyz \
   --type belongs_to
 ```
+
+Omit `--schema` to allow any metadata; pass `--schema` to validate the relationship's `--data` against a JSON Schema.
 
 ### 5. Traverse relationships
 
@@ -266,7 +279,7 @@ Execute read-only SQL queries directly against database data. Supports filtering
 rekor sql "<query>" --database <ws> [--param key=value ...] [--file query.sql]
 ```
 
-**Tables**: `documents`, `relationships`, `collections`, `databases`, `operations_log`, `organization`
+**Tables**: `documents`, `relationships`, `collections`, `relationship_types`, `databases`, `operations_log`, `organization`
 
 The `organization` table exposes org-level metadata (e.g. plan/status) and requires an `{org_id:String}` predicate instead of `{database_id:String}`.
 
@@ -300,6 +313,17 @@ rekor sql "SELECT * FROM documents WHERE database_id = {database_id:String} AND 
 rekor sql "SELECT *, jaroWinklerSimilarity(lowerUTF8(data.car_model.:String), lowerUTF8({q:String})) AS score FROM documents WHERE database_id = {database_id:String} AND collection = 'vehicles' AND deleted = false AND score >= 0.85 ORDER BY score DESC LIMIT 10" --database my-ws --param q='honda civic'
 ```
 
+### Relationship Types
+
+A relationship type defines a `rel_type` and is required before any relationship of that type can be created (a config operation — preview then promote). `--schema` (optional) validates relationship metadata; `--source-collections`/`--target-collections` (optional) restrict which collections it may connect.
+
+```bash
+rekor relationship-types upsert <rel_type> --database <ws> [--description <text>] [--schema <json>] [--source-collections <json>] [--target-collections <json>]
+rekor relationship-types list --database <ws>
+rekor relationship-types get <rel_type> --database <ws>
+rekor relationship-types delete <rel_type> --database <ws>
+```
+
 ### Relationships
 
 ```bash
@@ -308,6 +332,8 @@ rekor relationships get <id> --database <ws>
 rekor relationships delete <id> --database <ws>
 rekor query-relationships <collection> <id> --database <ws> [--type <type>] [--direction outgoing|incoming|both] [--limit <n>] [--offset <n>]
 ```
+
+The `--type` must be a declared relationship type. `--data` is validated against that type's schema.
 
 ### Hooks (inbound webhooks)
 
