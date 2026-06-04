@@ -214,8 +214,34 @@ rekor collections delete <id> --database <ws>
 ```bash
 rekor documents upsert <collection> --database <ws> --data <json|@file> [--id <uuid>] [--external-id <id>] [--external-source <src>]
 rekor documents get <collection> <id> --database <ws>
+rekor documents query <collection> --database <ws> [--filter <json|@file>] [--sort <json>] [--fields <list>] [--limit <n>] [--offset <n>]
 rekor documents delete <collection> <id> --database <ws>
 ```
+
+**Filtering & search.** `query` (REST `GET /documents/<collection>`, MCP `query_documents`) takes a Filter DSL expression — a condition `{field, op, value}` or an `and`/`or` group of them. Operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`, `not_in`, `like`, `ilike`, `is_null`, `is_not_null`, `has`, and **`search`**.
+
+`search` matches a field by **approximate** value — use it when you have a near-correct string but not the exact stored one (e.g. a model name, a place, a plan name, a SKU with a possible typo). Results come back **ranked by closeness**, each carrying a `_search_score` (0–1, higher = closer):
+
+```jsonc
+// "find vehicles whose model is close to 'honda civic', only active ones"
+{ "and": [
+  { "field": "data.status",    "op": "eq",     "value": "active" },
+  { "field": "data.car_model", "op": "search", "value": "honda civic" }
+] }
+```
+
+Every field is searchable by default — `search` needs no setup. Exact filters and `search` compose in one query: put exact conditions alongside the `search` leg so the exact ones narrow the set and `search` ranks within it. To **tune** how a field is matched, set an optional `x-search` hint on that field in the collection schema:
+
+```jsonc
+"car_model": { "type": "string", "x-search": { "mode": "name" } }
+```
+
+- `mode: "name"` — short proper nouns (people, brands, plan/model names); favors close, prefix-aligned matches.
+- `mode: "text"` — free-text / multi-word fields; matches on shared word fragments.
+- `mode: "fuzzy"` — codes / SKUs / IDs where typos dominate.
+- `threshold` (0–1) — minimum closeness to return; `searchable: false` — forbid searching a field (e.g. a large free-text blob you never want scanned).
+
+Tuning is optional — unset fields use a sensible default. `x-search` hints apply to **top-level fields**; `search` still works on nested paths (e.g. `data.address.city`) using the default behavior, they just aren't individually tuned. Search runs against the latest synced data, so a document written a moment earlier may take a brief moment to appear.
 
 **Cancellation & archival.** A document can be *cancelled* — a first-class state distinct from delete — via MCP (`manage_document` `cancel`) or REST (`POST .../documents/<collection>/<id>/cancel`); there is no CLI `cancel` subcommand. A cancelled document can no longer be updated. Documents may also be *archived* automatically per a collection's archival policy (e.g. once they reach a terminal or immutable state, which itself blocks further updates). An archived document stays readable and can still be cancelled, but it can't be deleted, and re-upserting by the same `external_id` creates a **new** document rather than updating the archived one. When querying with `rekor sql`, add `archived = false` to see only active documents (cancelled rows carry `cancelled = true`).
 
@@ -268,6 +294,10 @@ rekor sql "WITH inv AS (SELECT id, data.invoice_number.:String as num, arraySum(
 
 # With parameters
 rekor sql "SELECT * FROM documents WHERE database_id = {database_id:String} AND data.status.:String = {status:String} AND deleted = false" --database my-ws --param status=issued
+
+# Fuzzy / approximate text match, ranked by closeness (power-user form of `documents query --filter {op:search}`).
+# Fold case + accents on BOTH sides so "São" matches "sao"; jaroWinklerSimilarity suits short names.
+rekor sql "SELECT *, jaroWinklerSimilarity(lowerUTF8(data.car_model.:String), lowerUTF8({q:String})) AS score FROM documents WHERE database_id = {database_id:String} AND collection = 'vehicles' AND deleted = false AND score >= 0.85 ORDER BY score DESC LIMIT 10" --database my-ws --param q='honda civic'
 ```
 
 ### Relationships
