@@ -515,14 +515,18 @@ Store credentials at the organization level — API keys, signing secrets, or cr
 # Store a string secret
 rekor secrets create --name stripe-key --value sk_live_xxx --tags billing
 
-# Store a credential file (base64-encoded) with its type — e.g. a client certificate
-rekor secrets create --name partner-cert --file ./partner.p12 --content-type application/x-pkcs12
+# Store a credential file (base64-encoded) with its type, and an expiry — e.g. a client certificate
+rekor secrets create --name partner-cert --file ./partner.p12 \
+  --content-type application/x-pkcs12 --expires-at 2027-01-01T00:00:00Z
 
 rekor secrets list                         # List (values masked)
+rekor secrets list --expiring [--days 30]  # Only secrets expiring/expired within the window
 rekor secrets get <id>                      # Metadata (value masked)
-rekor secrets rotate <id> --value <new>     # Install a new value (rotation never auto-generates)
+rekor secrets rotate <id> --value <new> [--expires-at <iso>]  # Install a new value (never auto-generates)
 rekor secrets delete <id>
 ```
+
+Set `--expires-at` (ISO-8601) on credentials that lapse — yearly certificates, time-bound tokens — then `rekor secrets list --expiring` surfaces what needs renewing before it breaks an integration. Expiry is informational; Rekor never auto-disables a secret.
 
 ### Account & Diagnostics
 
