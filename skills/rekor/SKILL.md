@@ -290,7 +290,7 @@ rekor hooks get <id> --database <ws>
 rekor hooks delete <id> --database <ws>
 ```
 
-`--secret` is the HMAC shared secret the sender signs ingest requests with (required). `--collection-scope` restricts which collections the hook may write to (omit for all). Hooks can only be created/deleted in preview databases. Promote to production when ready.
+`--secret` is the HMAC shared secret the sender signs ingest requests with (required). Ingest accepts either **Signing v1** — `X-Rekor-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Rekor-Timestamp` Rekor checks for freshness (the same scheme triggers and proxied calls use, so one signer works both directions) — or a legacy body-only HMAC for older senders. `--collection-scope` restricts which collections the hook may write to (omit for all). Hooks can only be created/deleted in preview databases. Promote to production when ready.
 
 ### Triggers (outbound webhooks)
 
