@@ -222,6 +222,8 @@ rekor collections delete <id> --database <ws>
 
 `--icon`/`--color` are display hints for the inspection UI. `--sources` declares **external sources** — see the External Sources section below.
 
+Deleting a collection also removes all of its documents (and any relationships pointing at them); a collection recreated with the same id starts empty.
+
 ### Documents
 
 ```bash
@@ -323,6 +325,8 @@ rekor relationship-types list --database <ws>
 rekor relationship-types get <rel_type> --database <ws>
 rekor relationship-types delete <rel_type> --database <ws>
 ```
+
+Deleting a relationship type also removes all relationships of that type.
 
 ### Relationships
 
