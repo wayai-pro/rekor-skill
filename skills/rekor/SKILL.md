@@ -539,6 +539,13 @@ Connect agents to the endpoint URL with a token scoped to exactly one database. 
 
 Endpoints can only be created/modified in preview databases. Promote to production when ready.
 
+**Which database serves the endpoint:** `mcp.rekor.pro/e/{slug}/mcp` resolves the endpoint from the database your **token** is scoped to. So:
+
+- **Production:** promote the endpoint, then connect with a token scoped to the production database (`my-ws`).
+- **Preview (sandbox testing):** connect with a token scoped to the **preview database id** (`my-ws--<preview-slug>`) to serve the not-yet-promoted endpoint.
+
+If the slug can't be resolved for your token's database (unknown endpoint, or one that only exists in a preview you aren't scoped to), `initialize` returns a clear JSON-RPC error telling you to scope to the preview database id or promote — it won't silently hand back a session with zero tools.
+
 ### API Tokens
 
 Create scoped tokens for agents, integrations, and CI/CD. Tokens can be restricted to specific databases, collections, environments, and permissions. Tokens are hashed before storage — the raw value is shown only once on creation.
