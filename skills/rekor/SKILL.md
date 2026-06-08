@@ -269,6 +269,18 @@ Tuning is optional — unset fields use a sensible default. `x-search` hints app
 
 **Cancellation & archival.** Documents are **updatable by default** — re-upserting the same `external_id` updates the existing document in place (idempotent upsert), and you can advance state freely (e.g. `scheduled → confirmed`). A collection can opt into stricter archival via its schema's `x-archival.mode`: `immutable` (write-once — any update is rejected) or `on_attribute` (updatable until a configured terminal value). A document can also be *cancelled* — a first-class state distinct from delete — via MCP (`manage_document` `cancel`) or REST (`POST .../documents/<collection>/<id>/cancel`); there is no CLI `cancel` subcommand. A cancelled document can no longer be updated. Documents may also be *archived* automatically (when they reach a terminal/immutable state, or after a long period of inactivity). An archived document stays readable and can still be cancelled, but it can't be deleted, and re-upserting by the same `external_id` creates a **new** document rather than updating the archived one. When querying with `rekor sql`, add `archived = false` to see only active documents (cancelled rows carry `cancelled = true`).
 
+**Referential integrity (foreign keys).** A field can be declared a **foreign key** into another collection by adding an `x-fk` hint to that field in the schema. Every write then checks the value points at a real document — a missing reference is rejected with an actionable error instead of landing as silent bad data.
+
+```jsonc
+"patient_id":      { "type": "string", "x-fk": { "collection": "patients" } },                 // matches patients by external_id (default)
+"professional_id": { "type": "string", "x-fk": { "collection": "professionals", "key": "code" } } // matches a named field on the target
+```
+
+- `key` is the field on the **target** that the value must match — `external_id` by default, or any top-level field (e.g. a `code`).
+- Checked on every write (create, full upsert, partial update, batch). Empty/absent values are skipped — mark the field `required` if it must be present.
+- In a **batch**, write the target before the document that references it (the batch is atomic — a bad reference rejects the whole batch).
+- Use foreign keys for **reference data** (patients, plans, products), not high-volume event logs — a referenced collection is kept readily available so the check stays fast.
+
 ### Attachments
 
 Store large or binary content (PDFs, images, files) as attachments on a document and reference them from the document data — document/relationship JSON is for structured data and is capped at ~1 MiB, so inlining base64 blobs is rejected. Filenames may contain paths for folder structure (e.g. `docs/guide.md`).
