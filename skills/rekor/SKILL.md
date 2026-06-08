@@ -524,7 +524,12 @@ rekor endpoints upsert invoicing-agent --database my-ws --config '{
       "collection": "invoices",
       "operations": ["get", "list"],
       "name_override": "search_invoices",
-      "description_override": "Search invoices by customer, status, or date range"
+      "description_override": "Search invoices by customer, status, or date range",
+      "filterable_fields": [
+        { "field": "status" },
+        { "field": "issued_at" },
+        { "field": "customer", "match": "text" }
+      ]
     },
     {
       "collection": "payments",
@@ -545,6 +550,14 @@ rekor endpoints upsert invoicing-agent --database my-ws --config '{
 ```
 
 Or from a file: `--config @endpoint.json`
+
+**Typed filter params (`filterable_fields`)**: expose chosen fields of a collection as typed parameters on its generated `list` tool, derived from the collection schema — so the agent fills native arguments instead of writing a filter expression. Each field becomes a parameter shaped by its type:
+
+- an `enum` or boolean field → an exact-match param (the agent can only pick a valid value)
+- a number or date/date-time field → a range pair (`<field>_min`/`<field>_max`, or `<field>_after`/`<field>_before`)
+- a string field → a `<field>_contains` substring param
+
+Per field you may set `param` (rename the generated param), `match` (`exact` | `range` | `text` | `any_of` — `any_of` accepts a list, matching any) to override the inferred behavior, and `description`. Invalid fields (unknown, array- or object-typed, or name-clashing) are rejected when you save the endpoint — for an object field, expose a nested path (`address.city`) instead. The generic `filter` parameter stays on the tool as the escape hatch for anything the typed params can't express (OR / nesting); typed params and `filter` are combined with AND.
 
 Connect agents to the endpoint URL with a token scoped to exactly one database. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts.
 
