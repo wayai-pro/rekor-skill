@@ -200,6 +200,7 @@ rekor query-relationships invoices rec_abc --database my-ws \
 rekor databases list [--tag <tag>]
 rekor databases get <id>
 rekor databases create <id> --name <name> [--description <desc>] [--tags <comma-separated>]
+rekor databases rename <id> --name <new-name>   # display name only — the id/slug is immutable
 rekor databases tag <id> --tags <comma-separated>
 rekor databases delete <id>
 rekor databases create-preview <prod-id> --name <preview-slug> [--description <desc>]
