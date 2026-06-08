@@ -218,6 +218,7 @@ rekor collections list --database <ws>
 rekor collections get <id> --database <ws>
 rekor collections upsert <id> --database <ws> --name <name> --schema <json|@file> [--description <desc>] [--icon <name>] [--color <hex>] [--sources <json|@file>]
 rekor collections delete <id> --database <ws>
+rekor collections history <id> --database <ws> [--limit <n>] [--offset <n>] [--diff]
 ```
 
 `--icon`/`--color` are display hints for the inspection UI. `--sources` declares **external sources** — see the External Sources section below.
@@ -231,7 +232,10 @@ rekor documents upsert <collection> --database <ws> --data <json|@file> [--id <u
 rekor documents get <collection> <id> --database <ws>
 rekor documents query <collection> --database <ws> [--filter <json|@file>] [--sort <json>] [--fields <list>] [--limit <n>] [--offset <n>]
 rekor documents delete <collection> <id> --database <ws>
+rekor documents history <id> --database <ws> [--limit <n>] [--offset <n>] [--diff]
 ```
+
+`history` returns the full change history for an entity — every version as a snapshot, who changed it, the operation, and when. Admin-only: available to organization owners/admins or a token granted `read:audit`; ordinary agent tokens are rejected. (Same `history` subcommand exists on `relationships`, `collections`, and `relationship-types`.)
 
 **Filtering & search.** `query` (REST `GET /documents/<collection>`, MCP `query_documents`) takes a Filter DSL expression — a condition `{field, op, value}` or an `and`/`or` group of them. Operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`, `not_in`, `like`, `ilike`, `is_null`, `is_not_null`, `has`, and **`search`**.
 
@@ -324,6 +328,7 @@ rekor relationship-types upsert <rel_type> --database <ws> [--description <text>
 rekor relationship-types list --database <ws>
 rekor relationship-types get <rel_type> --database <ws>
 rekor relationship-types delete <rel_type> --database <ws>
+rekor relationship-types history <rel_type> --database <ws> [--limit <n>] [--offset <n>] [--diff]
 ```
 
 Deleting a relationship type also removes all relationships of that type.
@@ -334,6 +339,7 @@ Deleting a relationship type also removes all relationships of that type.
 rekor relationships upsert --database <ws> --source <col/id> --target <col/id> --type <type> [--id <id>] [--data <json>]
 rekor relationships get <id> --database <ws>
 rekor relationships delete <id> --database <ws>
+rekor relationships history <id> --database <ws> [--limit <n>] [--offset <n>] [--diff]
 rekor query-relationships <collection> <id> --database <ws> [--type <type>] [--direction outgoing|incoming|both] [--limit <n>] [--offset <n>]
 ```
 
@@ -570,7 +576,7 @@ rekor tokens list
 rekor tokens revoke <token_id>
 ```
 
-**Permissions**: `read:documents`, `write:documents`, `read:collections`, `write:collections`, `read:relationships`, `write:relationships`, `read:attachments`, `write:attachments`, `read:hooks`, `write:hooks`, `read:triggers`, `write:triggers`, `read:endpoints`, `write:endpoints`, `read:databases`, `write:databases`, or `*` for all.
+**Permissions**: `read:documents`, `write:documents`, `read:collections`, `write:collections`, `read:relationships`, `write:relationships`, `read:attachments`, `write:attachments`, `read:hooks`, `write:hooks`, `read:triggers`, `write:triggers`, `read:endpoints`, `write:endpoints`, `read:databases`, `write:databases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), or `*` for all.
 
 **Scope fields**: `databases` (required), `collections` (optional — omit for all), `environments` (optional — `production`, `preview`, or omit for both).
 
