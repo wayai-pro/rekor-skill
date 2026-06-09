@@ -607,11 +607,24 @@ When the typed params cover everything an agent needs, set `"expose_filter": fal
 
 The list tool's machinery params (`sort`, `limit`, `offset`, `fields`) can each be hidden the same way — `"expose_sort"`/`"expose_limit"`/`"expose_offset"`/`"expose_fields": false` — and given a server-side default (`"default_sort"`/`"default_limit"`/`"default_fields"`) that still applies when the param is hidden. A hidden `limit` surfaces a `"truncated"` flag in the response if it caps the result, so rows are never silently dropped. `"agent_minimal": true` is a preset that hides all of them (plus `filter`) with a generous default limit, leaving an inputSchema that is pure typed semantics; any explicit `expose_*`/`default_*` on the same tool overrides the preset.
 
+**Conditional writes (`precondition`)**: give a `create`/`update` tool a `precondition` — a Filter DSL expression checked against the document's **current** state before the write applies. If it doesn't hold, the write is rejected with a 409 conflict and nothing changes; if it holds, the write proceeds. This turns a fragile read-then-write into one correct, race-free call: model a bookable slot as a document and make "book it" a guarded update, so two agents can't both book the same slot.
+
+```json
+{
+  "collection": "slots",
+  "operations": ["update"],
+  "names": { "update": "book_slot" },
+  "precondition": { "field": "data.status", "op": "eq", "value": "free" }
+}
+```
+
+The guard is **invisible to the agent** — it's part of the endpoint config, never a tool parameter — so the agent just calls `book_slot(...)` and the booking integrity is enforced for it. Paths address the current document as `data.<field>`, `version`, or `id` (e.g. `{ "field": "version", "op": "is_null" }` = create-only-if-absent). One precondition per tool; the `search` operator isn't allowed. Idempotent writes (retries that shouldn't double-create) are already handled by upsert-by-`external_id` — the precondition is for cross-state guards, not retry safety.
+
 The generated `list` tools are lenient about how structured arguments arrive: `filter` is always a JSON-encoded Filter DSL string, while `sort` and any multi-value (`any_of`) parameter accept **either** the native array **or** a JSON-encoded string of it — so an agent that serializes array arguments as strings still works. (`sort` is the same JSON array of `{"field","direction"}` terms described above.)
 
 Connect agents to the endpoint URL with a token scoped to exactly one database. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts.
 
-Endpoints can only be created/modified in preview databases. Promote to production when ready. Promotion is blocked if it would break a published endpoint — removing a collection or relationship type the endpoint exposes, or a field its typed filters depend on — so promote the endpoint together with the schema change (a dry run lists any such conflicts first).
+Endpoints can only be created/modified in preview databases. Promote to production when ready. Promotion is blocked if it would break a published endpoint — removing a collection or relationship type the endpoint exposes, or a field its typed filters or a `precondition` depend on — so promote the endpoint together with the schema change (a dry run lists any such conflicts first).
 
 **Which database serves the endpoint:** `mcp.rekor.pro/e/{slug}/mcp` resolves the endpoint from the database your **token** is scoped to. So:
 
