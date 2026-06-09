@@ -522,7 +522,7 @@ rekor endpoints upsert invoicing-agent --database my-ws \
   --batch "invoices:create,update" --batch "payments:create" --batch "invoice_payment:create" \
   --sql-query
 
-# Get the MCP connection URL (add --transport sse for the SSE endpoint; default mcp)
+# Get the MCP connection URL (Streamable HTTP)
 rekor endpoints url invoicing-agent
 # → https://mcp.rekor.pro/e/invoicing-agent/mcp
 
@@ -589,7 +589,7 @@ The generated `list` tools are lenient about how structured arguments arrive: `f
 
 Connect agents to the endpoint URL with a token scoped to exactly one database. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts.
 
-Endpoints can only be created/modified in preview databases. Promote to production when ready.
+Endpoints can only be created/modified in preview databases. Promote to production when ready. Promotion is blocked if it would break a published endpoint — removing a collection or relationship type the endpoint exposes, or a field its typed filters depend on — so promote the endpoint together with the schema change (a dry run lists any such conflicts first).
 
 **Which database serves the endpoint:** `mcp.rekor.pro/e/{slug}/mcp` resolves the endpoint from the database your **token** is scoped to. So:
 
