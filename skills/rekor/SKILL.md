@@ -585,6 +585,8 @@ Or from a file: `--config @endpoint.json`
 
 Per field you may set `param` (rename the generated param), `match` (`exact` | `range` | `text` | `any_of` — `any_of` accepts a list, matching any) to override the inferred behavior, and `description`. Invalid fields (unknown, array- or object-typed, or name-clashing) are rejected when you save the endpoint — for an object field, expose a nested path (`address.city`) instead. The generic `filter` parameter stays on the tool as the escape hatch for anything the typed params can't express (OR / nesting); typed params and `filter` are combined with AND.
 
+When the typed params cover everything an agent needs, set `"expose_filter": false` on the tool to drop the generic `filter` parameter entirely — keeping the agent-facing tool schema small. Server-side translation of the typed params is unaffected.
+
 The generated `list` tools are lenient about how structured arguments arrive: `filter` is always a JSON-encoded Filter DSL string, while `sort` and any multi-value (`any_of`) parameter accept **either** the native array **or** a JSON-encoded string of it — so an agent that serializes array arguments as strings still works. (`sort` is the same JSON array of `{"field","direction"}` terms described above.)
 
 Connect agents to the endpoint URL with a token scoped to exactly one database. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts.
