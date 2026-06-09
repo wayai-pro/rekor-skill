@@ -481,6 +481,8 @@ rekor batch --database <ws> --operations '[
 
 Operation types: `upsert_document`, `delete_document`, `upsert_relationship`, `delete_relationship`, `upsert_collection`, `delete_collection`
 
+**Reading results**: the default (table) output prints a one-line summary per operation (index, type, resulting id). Add `--output json` for the full per-operation payload — the complete document/relationship of every write. Because the batch is atomic, a single failing operation rolls the **whole** batch back and the command exits non-zero with `Operation <N> failed: <reason>` naming the offending index — no partial writes land.
+
 ### Provider Adapters
 
 Import tool definitions from any LLM provider as collections, or export collections as tool definitions.
