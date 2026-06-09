@@ -624,6 +624,8 @@ The generated `list` tools are lenient about how structured arguments arrive: `f
 
 Connect agents to the endpoint URL with a token scoped to exactly one database. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts.
 
+For least-privilege, mint a token bound to the endpoint in one step: `rekor tokens create-for-endpoint <slug> --database <db>` (or pass `--mint-token` to `rekor endpoints upsert`). An endpoint-bound token's authorization IS the endpoint's tool surface — exactly those collections and operations, relationships, batch, and SQL only if you enabled it, nothing else — so a leaked token can't reach beyond the tools you exposed, and you can rotate or revoke one per agent.
+
 Endpoints can only be created/modified in preview databases. Promote to production when ready. Promotion is blocked if it would break a published endpoint — removing a collection or relationship type the endpoint exposes, or a field its typed filters or a `precondition` depend on — so promote the endpoint together with the schema change (a dry run lists any such conflicts first).
 
 **Which database serves the endpoint:** `mcp.rekor.pro/e/{slug}/mcp` resolves the endpoint from the database your **token** is scoped to. So:
