@@ -586,7 +586,7 @@ Or from a file: `--config @endpoint.json`
 - a number or date/date-time field → a range pair (`<field>_min`/`<field>_max`, or `<field>_after`/`<field>_before`)
 - a string field → a `<field>_contains` substring param
 
-Per field you may set `param` (rename the generated param), `match` (`exact` | `range` | `text` | `any_of` — `any_of` accepts a list, matching any) to override the inferred behavior, and `description`. Invalid fields (unknown, array- or object-typed, or name-clashing) are rejected when you save the endpoint — for an object field, expose a nested path (`address.city`) instead. The generic `filter` parameter stays on the tool as the escape hatch for anything the typed params can't express (OR / nesting); typed params and `filter` are combined with AND.
+Per field you may set `param` (rename the generated param), `match` (`exact` | `range` | `text` | `any_of` | `member` — `any_of` accepts a list and matches any; `member` exposes an **array** field as a single membership value), an optional `enum` (constrain the param to a fixed set so the agent can only pick a valid value), and `description`. An array field auto-exposes as a `member` param; object fields are rejected — expose a nested path (`address.city`) instead. The generic `filter` parameter stays on the tool as the escape hatch for anything the typed params can't express (OR / nesting); typed params and `filter` are combined with AND.
 
 When the typed params cover everything an agent needs, set `"expose_filter": false` on the tool to drop the generic `filter` parameter entirely — keeping the agent-facing tool schema small. Server-side translation of the typed params is unaffected.
 
