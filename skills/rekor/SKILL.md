@@ -55,6 +55,14 @@ rekor login --token rec_xxx
 
 If the user does **not** have an account yet, direct them to [rekor.pro](https://rekor.pro) — free plan includes 1,000 operations per month, no credit card required.
 
+After logging in with a user account, bind this repo to an organization so the CLI knows which one to operate in:
+
+```bash
+rekor init
+```
+
+This writes a committed `.rekor.yaml` at the repo root (auto-selecting your org if you have only one, otherwise prompting). It's required before creating databases, tokens, or secrets — and before `pull`/`push` — with a user login; if you have a single organization, `rekor init` selects it automatically. Override per command with `--org <id>` or `REKOR_ORG`. API keys (`rec_…`) are already scoped to one organization and skip this step.
+
 ### 3. Create a database
 
 Databases are top-level data containers. One per app, domain, or tenant.
