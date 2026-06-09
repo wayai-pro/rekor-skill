@@ -604,7 +604,7 @@ rekor endpoints upsert invoicing-agent --database my-ws --config '{
 
 Or from a file: `--config @endpoint.json`
 
-**Tool names (`name` / `names`)**: each generated tool is named `<op>_<name>` — `name` is the base noun, defaulting to the collection id (so `invoices` → `get_invoices`, `list_invoices`). Set `name` to choose the base (e.g. `"name": "invoice"` → `get_invoice`). Override an individual tool with `names`, a per-operation map of literal names (`{ "list": "search_invoices" }`), so a tool reads as the job it does. Relationship ops map to `link_`/`list_`/`unlink_` over their base. Tool names must be unique across the endpoint.
+**Tool names (`name` / `names`)**: each generated tool is named `<op>_<name>` — `name` is the base noun, defaulting to the collection id (so `invoices` → `get_invoices`, `list_invoices`). Set `name` to choose the base (e.g. `"name": "invoice"` → `get_invoice`). Override an individual tool with `names`, a per-operation map of literal names (`{ "list": "search_invoices" }`), so a tool reads as the job it does. Relationship ops map to `link_`/`list_`/`unlink_` over their base. Tool names must be unique across the endpoint. Only `name` and `names` control naming — there is no `name_override` key, and every key inside `names` must be a valid operation. An unknown or deprecated key on a tool is rejected at config-write, so a stray key can never be silently accepted and then ignored.
 
 **Typed filter params (`filterable_fields`)**: expose chosen fields of a collection as typed parameters on its generated `list` tool, derived from the collection schema — so the agent fills native arguments instead of writing a filter expression. Each field becomes a parameter shaped by its type:
 
@@ -630,6 +630,26 @@ The list tool's machinery params (`sort`, `limit`, `offset`, `fields`) can each 
 ```
 
 The guard is **invisible to the agent** — it's part of the endpoint config, never a tool parameter — so the agent just calls `book_slot(...)` and the booking integrity is enforced for it. Paths address the current document as `data.<field>`, `version`, or `id` (e.g. `{ "field": "version", "op": "is_null" }` = create-only-if-absent). One precondition per tool; the `search` operator isn't allowed. Idempotent writes (retries that shouldn't double-create) are already handled by upsert-by-`external_id` — the precondition is for cross-state guards, not retry safety.
+
+**Guarded + unguarded writes on one collection**: a `precondition` is one-per-tool, so to expose both a guarded write and a plain write on the same collection, declare two tool entries for that collection with the same operation but distinct `names`. Tool names only need to be unique across the endpoint — a duplicate (collection, operation) pair is fine:
+
+```json
+"tools": [
+  {
+    "collection": "slots",
+    "operations": ["update"],
+    "names": { "update": "book_slot" },
+    "precondition": { "field": "data.status", "op": "eq", "value": "free" }
+  },
+  {
+    "collection": "slots",
+    "operations": ["update"],
+    "names": { "update": "manage_slot" }
+  }
+]
+```
+
+`book_slot` succeeds only on a slot that's still `free`; `manage_slot` updates the same slot unconditionally (e.g. an operator correction). Without the distinct `names`, both would default to `update_slots` and collide.
 
 The generated `list` tools are lenient about how structured arguments arrive: `filter` is always a JSON-encoded Filter DSL string, while `sort` and any multi-value (`any_of`) parameter accept **either** the native array **or** a JSON-encoded string of it — so an agent that serializes array arguments as strings still works. (`sort` is the same JSON array of `{"field","direction"}` terms described above.)
 
