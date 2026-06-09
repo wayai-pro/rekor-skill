@@ -212,6 +212,21 @@ rekor databases rollback <prod-id> --promotion <promotion-id>
 
 Tags let you group databases (e.g., `client:acme,billing`). Filter with `--tag`. Promotion is **human-only** (see Environments). Promote selectively with `--collections`/`--triggers`/`--hooks` (omit to promote everything). `promotions` lists prior promotions; `rollback` reverts one by ID.
 
+### Config as Code (pull / push)
+
+Manage a database's whole config — collections, relationship types, hooks, triggers, MCP endpoints — as version-controlled YAML files instead of one-off commands. Files live under `rekor-ws/databases/<db>/`, one file per entity, so changes review cleanly in a pull request.
+
+```bash
+rekor pull <preview>                 # write the preview's config to rekor-ws/databases/<preview>/
+rekor push <preview> [--dry-run]     # apply your local files to the preview (--dry-run shows the diff only)
+rekor push <preview> --prune         # also delete entities that exist on the server but not in your files
+```
+
+- **Previews only.** `pull`/`push` operate on **preview** databases (config is never edited directly in production). `pull` refuses a production database. To ship, run `rekor databases promote` as usual.
+- **Auto-create a preview.** Scaffold `rekor-ws/databases/<name>/database.yaml` with `origin_database_id: <prod-id>` (and no `database_id`); `rekor push` creates the preview from that production database, writes the new id back, and applies your files.
+- **Secrets are never written to files.** Hook/trigger and external-source secrets are stripped on `pull`. On `push`, a newly added hook/trigger gets a fresh secret (printed once — save it); existing secrets are left untouched. Manage secret values with `rekor hooks` / `rekor triggers` / `rekor secrets`.
+- **Deletions are opt-in.** Because deleting a collection also removes its documents, `push` is additive by default: entities missing from your files are reported but kept. Add `--prune` to delete them.
+
 ### Collections
 
 ```bash
