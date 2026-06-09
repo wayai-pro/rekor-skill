@@ -549,7 +549,8 @@ rekor endpoints upsert invoicing-agent --database my-ws --config '{
     {
       "collection": "invoices",
       "operations": ["get", "list"],
-      "name_override": "search_invoices",
+      "name": "invoice",
+      "names": { "list": "search_invoices" },
       "description_override": "Search invoices by customer, status, or date range",
       "filterable_fields": [
         { "field": "status" },
@@ -567,7 +568,7 @@ rekor endpoints upsert invoicing-agent --database my-ws --config '{
     {
       "rel_type": "invoice_payment",
       "operations": ["create", "list"],
-      "name_override": "assign_payment",
+      "names": { "create": "assign_payment" },
       "description_override": "Link a payment to an invoice"
     }
   ],
@@ -576,6 +577,8 @@ rekor endpoints upsert invoicing-agent --database my-ws --config '{
 ```
 
 Or from a file: `--config @endpoint.json`
+
+**Tool names (`name` / `names`)**: each generated tool is named `<op>_<name>` — `name` is the base noun, defaulting to the collection id (so `invoices` → `get_invoices`, `list_invoices`). Set `name` to choose the base (e.g. `"name": "invoice"` → `get_invoice`). Override an individual tool with `names`, a per-operation map of literal names (`{ "list": "search_invoices" }`), so a tool reads as the job it does. Relationship ops map to `link_`/`list_`/`unlink_` over their base. Tool names must be unique across the endpoint.
 
 **Typed filter params (`filterable_fields`)**: expose chosen fields of a collection as typed parameters on its generated `list` tool, derived from the collection schema — so the agent fills native arguments instead of writing a filter expression. Each field becomes a parameter shaped by its type:
 
