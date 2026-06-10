@@ -8,7 +8,8 @@ description: |
   operations, backing a collection with an external API (external sources), storing
   credentials in the secret vault, importing or exporting tool definitions across
   providers (OpenAI/Anthropic/Google/MCP), creating curated MCP Factory endpoints,
-  scoping API tokens, or interpreting Rekor concepts (database, collection, document,
+  scoping API tokens, modeling collections and MCP endpoints so LLM agents use them
+  reliably, or interpreting Rekor concepts (database, collection, document,
   relationship, preview/production, external_id).
 ---
 
@@ -771,6 +772,22 @@ When you're done, ask a human operator to promote your changes:
 ```
 
 **Promotion is a human-only operation.** You cannot promote directly. Always work in preview for schema changes.
+
+## Modeling Principles for Agent Consumption
+
+The command reference above is the *mechanics*. This is how to **combine** them so an agent-backed app is reliable. The mechanics make almost any shape possible; these principles pick the shape that makes a fallible LLM agent succeed. They are domain-neutral — apply them whether you model invoices, appointments, or tickets.
+
+**The one rule: model it so the right thing is the only easy thing to express, and the wrong thing is impossible.** The gap between an agent that systematically drops steps and one that runs a clean full lifecycle is usually the *shape* of the schema and tools — not the prompt or the model.
+
+1. **One intent = one atomic write.** An action that takes N separate writes is N chances to drop one and leave the system half-updated. Collapse a single user intent into a single write; when one intent genuinely spans multiple documents, use `rekor batch` so they all commit or all roll back.
+2. **State lives on the entity — don't duplicate it.** Keep each piece of state in exactly one place, on the entity it describes. Mirroring a status onto a second document forces the agent to update both in sync, recreating the multi-write problem. Link or query the source of truth instead of copying its fields.
+3. **Expose the job, nothing more.** An agent-facing tool should express the task and nothing else. Push machinery — sort, limit, offset, field selection, the raw filter DSL — into endpoint config with `expose_*: false` plus server-side `default_*` (or the `agent_minimal` preset). The agent fills meaning via typed `filterable_fields`, not plumbing.
+4. **Guards belong in config, not arguments.** Enforce invariants server-side where the agent can't forget them, not as instructions it must follow. A `precondition` makes a state-dependent write race-free and invisible to the agent; schema `required` + enums reject malformed input. The rejection message is the recovery channel — keep it legible and actionable so the agent self-corrects.
+5. **Narrow the input space.** Every degree of freedom is a way to get it wrong. Constrain with enums (a closed set to pick from), typed `filterable_fields` (native params instead of free-form filter strings), stable `external_id` keys (idempotent upsert, no invented ids), and `x-fk` on writes (a reference must resolve to a real document).
+6. **Model for the fallible agent, not the ideal one.** Agents skip steps, send empty strings for fields they didn't fill, and invent ids. `required` rejects the missing field, enums reject the made-up value, `x-fk` rejects the invented reference, `precondition` rejects the out-of-order write — each turns a silent corruption into a clear, correctable error.
+7. **Separate the operator surface from the agent surface.** Keep the surface that *authors config* apart from the one that *invokes it*. Broad human/CI tokens design schemas and endpoints; endpoint-bound tokens (`rekor tokens create-for-endpoint`) only call the curated tools and can't reach past them. Name tools by action and cardinality (`book_slot`, `list_invoices`, `assign_payment`) so the name itself tells the agent what the tool does.
+
+**Also:** keep data **canonical and self-describing** — declare datetime fields `format: date-time` and set the collection's `x-timezone` so every value carries its offset, and prefer readable enums over opaque codes, so a document can be reasoned about without outside context. And **optimize the common path deliberately** — make the single most frequent action one well-named tool call, accepting more friction on the rare one.
 
 ## Best Practices
 
