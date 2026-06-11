@@ -789,6 +789,21 @@ The command reference above is the *mechanics*. This is how to **combine** them 
 
 **Also:** keep data **canonical and self-describing** — declare datetime fields `format: date-time` and set the collection's `x-timezone` so every value carries its offset, and prefer readable enums over opaque codes, so a document can be reasoned about without outside context. And **optimize the common path deliberately** — make the single most frequent action one well-named tool call, accepting more friction on the rare one.
 
+### Recipes: principle → the feature that realizes it
+
+The principles above are agent-layer and backend-neutral; these are the specific endpoint knobs that implement them — the lookup from intent to implementation. Each knob is detailed in the endpoint section above.
+
+- **One tool = one intent; curate the surface** — distinct `names` per operation (`names: { "list": "search_invoices" }`), even two tools on one collection; a curated `filterable_fields` list.
+- **Hide machinery (filter / sort / limit / offset / fields)** — `expose_*: false` per param (plus a server-side `default_*`), or the `agent_minimal` preset that hides them all at once.
+- **Constrain a closed set** — `filterable_fields[].enum`.
+- **Constrain a structured id or code** — `filterable_fields[].pattern` (e.g. `^pat-[0-9]+$`); published to the tool schema and enforced at runtime.
+- **Require a non-empty value** — automatic: discrete pick-a-value params reject empty and whitespace-only input (a placeholder like `""` is rejected, not silently matched).
+- **Fail loud + actionable, never silent** — `x-fk` on write fields; the empty / `enum` / `pattern` rejections on read params (read/write parity).
+- **Make a state-dependent write atomic + race-free** — a `create`/`update` tool with a `precondition` (compare-and-set; invisible to the agent; 409 on conflict).
+- **Nudge the agent toward the right value** — `filterable_fields[].description`: name the field's kind, source, and when to use it; use placeholder shapes, never real data values.
+
+**One gotcha:** an `enum` invites the agent to *pick* a value — right for a field it should always fill, wrong for an optional, usually-omitted one (a fixed set nudges it to choose rather than skip). For an optional filter, prefer a `pattern` (or a plain free param) so omitting it stays the natural default.
+
 ## Best Practices
 
 - **Use external IDs** for idempotent upserts — retry-safe, no duplicates.
