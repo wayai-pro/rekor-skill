@@ -728,6 +728,25 @@ rekor update                 # Update the CLI to the latest published version
 
 The CLI checks for a newer published version in the background and prints a one-line notice when an update is available. Disable the check with `REKOR_NO_UPDATE_CHECK=1` (also disabled when `NO_UPDATE_NOTIFIER` or `CI` is set).
 
+### Reporting
+
+File a bug or issue to the Rekor team, then follow it through to a fix. Reports are deduplicated, so re-filing the same problem merges into the existing one rather than spamming.
+
+```bash
+# File a report (deduplicated). --dedup-key collapses repeat occurrences of the same issue.
+rekor report create --title "Upsert 500s on large docs" --description "..." \
+  [--severity high] [--steps "..."] [--error-message "..."] [--dedup-key "<stable-key>"] \
+  [--database-id <id>] [--collection <name>] [--document-id <id>]   # entity pointers aid investigation
+
+# Track and verify your own reports
+rekor report list [--status shipped]      # your reports, newest first (--status shipped = awaiting your check)
+rekor report get <report_id>              # status + the message thread (the team's notes to you)
+rekor report accept <report_id>           # the shipped fix works → resolved
+rekor report contest <report_id> --reason "still reproduces because ..."   # the fix didn't work, or a dismissal is wrong → back to the team
+```
+
+**The verification loop.** After the team escalates and a fix ships, your report moves to `shipped`. Poll `rekor report list --status shipped`, read `rekor report get <id>` (status + the team's note), then `accept` if it works or `contest --reason "..."` if it doesn't. You can also `contest` a `dismissed` report you believe is real — it routes back to the team. Contests are bounded (a cap, and the team may mark a dismissal final); past those, contact support. You can only list/read/act on reports **you** filed.
+
 ---
 
 ## Output Format
