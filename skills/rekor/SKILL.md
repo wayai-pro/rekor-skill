@@ -745,7 +745,7 @@ rekor report accept <report_id>           # the shipped fix works → resolved
 rekor report contest <report_id> --reason "still reproduces because ..."   # the fix didn't work, or a dismissal is wrong → back to the team
 ```
 
-**The verification loop.** After the team escalates and a fix ships, your report moves to `shipped`. Poll `rekor report list --status shipped`, read `rekor report get <id>` (status + the team's note), then `accept` if it works or `contest --reason "..."` if it doesn't. You can also `contest` a `dismissed` report you believe is real — it routes back to the team. Contests are bounded (a cap, and the team may mark a dismissal final); past those, contact support. You can only list/read/act on reports **you** filed.
+**The verification loop.** After the team escalates and a fix ships, your report moves to `shipped` — you'll get an email, and `rekor login`/`rekor status` remind you once (or find it with `rekor report list --status shipped`). Read `rekor report get <id>` (status + the team's note), then `accept` if it works or `contest --reason "..."` if it doesn't. You can also `contest` a `dismissed` report you believe is real — it routes back to the team. Contests are bounded (a cap, and the team may mark a dismissal final); past those, contact support. You can only list/read/act on reports **you** filed.
 
 ---
 
