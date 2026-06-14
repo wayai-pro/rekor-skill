@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.2.0
+version: 1.3.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -436,6 +436,8 @@ Triggers are HMAC-signed (`X-Rekor-Signature: v1,<hex>` over id+timestamp+method
 ### Executors (acting on the outside world)
 
 Rekor records, signs, and dispatches — but the actual outside-world action (calling a third-party API, presenting a client certificate, running logic Rekor can't) happens in an **executor**: a small, stateless HTTP service you deploy and point a trigger or external source at. Rekor signs every dispatched request; the executor verifies it, does the work, and writes the result back.
+
+**Do you even need one?** A plain REST/JSON API → just an external source (no executor). Build an executor only when a trigger runs custom logic, or a source call can't be a direct HTTP request (mTLS, SOAP, binary creds, heavy processing). Hooks go the other way — your executor calls a hook to write results back in.
 
 **Always receive these requests with the `rekor-sdk` package — never hand-roll signature verification** (a mistake lets anyone forge a request to your executor). The SDK verifies the signature + timestamp, dedupes retries on the idempotency key, and normalizes errors — you write one handler:
 
