@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.0.0
+version: 1.1.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first

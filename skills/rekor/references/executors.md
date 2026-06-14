@@ -17,6 +17,19 @@ Rekor reaches an executor two ways, both signed identically:
 - **Triggers** — Rekor POSTs to the executor's URL when documents change (outbound webhooks).
 - **External sources** — Rekor proxies a document read/write through to the executor's URL.
 
+### Do you even need an executor?
+
+If your upstream is a REST/JSON API Rekor can call directly, configure an external source with field
+mapping — **no executor required**. Build an executor only when:
+- a **trigger** must run custom logic when documents change, or
+- an external-source call can't be a direct HTTP request Rekor makes itself — mutual-TLS, SOAP or raw
+  TCP, binary per-tenant credentials, multi-call orchestration, or heavier processing.
+
+An executor always *receives* Rekor's outbound dispatches (triggers and external sources). **Hooks are the
+reverse direction** — your executor calls a hook to write results back *into* Rekor, which Rekor
+receives. One `rekor-sdk` covers both sides: `createExecutor` verifies what Rekor sent you; `signRequest`
+signs what you send back.
+
 ## The one rule: never hand-roll verification — use `rekor-sdk`
 
 Every dispatched request is HMAC-signed and carries a timestamp and an idempotency key. Verifying that
