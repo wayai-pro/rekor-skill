@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.1.0
+version: 1.2.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -448,7 +448,7 @@ const handler = toFetchHandler(createExecutor({
 // Hono: app.post('/rekor', (c) => handler(c.req.raw))  •  Cloudflare: export default { fetch: handler }
 ```
 
-**Where to run it:** default to a **Cloudflare Worker** — most executors are just authenticated API calls, and a Worker is cheap, fast, and globally deployed. Reach for **Fly.io (or any container)** only when a Worker can't do the job: mutual-TLS client certificates, long-running work, raw TCP/SOAP, or native dependencies.
+**Where to run it:** default to a **serverless platform** (Cloudflare Workers, Vercel, Deno Deploy, AWS Lambda — pick whichever you already use; the contract is platform-agnostic) — most executors are just authenticated API calls, and a serverless function is cheap, fast, and scales to zero. Step up to a **long-running container or server** (Fly.io, Railway, Render, a VM) only when a serverless function can't do the job: mutual-TLS client certificates, long-running work, raw TCP/SOAP, or native dependencies.
 
 For the full contract, framework variants, the certificate-via-vault pattern, and local dev, read `references/executors.md` (bundled alongside this skill).
 

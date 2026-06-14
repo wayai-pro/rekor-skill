@@ -97,14 +97,17 @@ key (so an at-least-once delivery never double-acts), and a normalized error env
 
 ## Where to run it
 
-**Default to a Cloudflare Worker.** Most executors are just authenticated API calls, and a Worker is
-cheap, fast, globally deployed, and uses the SDK's Fetch handler directly.
+**Default to a serverless platform** — Cloudflare Workers, Vercel, Deno Deploy, AWS Lambda; pick
+whichever you already use, the executor's contract is platform-agnostic. Most executors are just
+authenticated API calls, and a serverless function is cheap, fast, scales to zero, and plugs straight
+into the SDK's Fetch handler.
 
-**Reach for Fly.io (or any container host) only when a Worker can't do the job:**
+**Step up to a long-running container or server** (Fly.io, Railway, Render, a VM — anything that holds
+an open process, via the SDK's Node adapter) only when a serverless function can't do the job:
 - **Mutual-TLS / client certificates** (e.g. a bank or government API that requires an A1 cert)
-- **Long-running** work beyond a Worker's CPU/time budget
+- **Long-running** work beyond a serverless function's CPU/time budget
 - **Raw TCP, SOAP, or other non-HTTP protocols**
-- **Native dependencies** (heavy crypto, language runtimes a Worker can't host)
+- **Native dependencies** (heavy crypto, language runtimes a serverless function can't host)
 
 These are exactly the cases Rekor deliberately can't handle itself — so they live in the executor.
 
