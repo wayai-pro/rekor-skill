@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.4.0
+version: 1.5.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -417,17 +417,22 @@ rekor inbound-webhooks delete <id> --database <ws>
 
 ### Triggers (data out)
 
-Triggers fire automatically when documents change, notifying external systems via HTTP POST.
+Triggers fire automatically when documents change. A trigger's action is one of:
+- **webhook** — an HMAC-signed HTTP POST to an external system (`--url`/`--secret`).
+- **internal_write** — Rekor updates a *referenced* document for you, with no external service. On a matching write it locates a target document and applies a guarded patch (an optional compare-and-set `precondition` so the update only lands when the target is still in the expected state). Ideal for "when A changes, update related B" — e.g. booking an appointment flips its slot to busy only if it was free. Pass it via `--action` (see below); document.created/updated only.
 
 ```bash
-rekor triggers create --database <ws> --name <name> --url <url> --secret <hmac-secret> --events <comma-separated> [--id <id>] [--collection-scope <comma-separated>] [--filter <json>]
+rekor triggers create --database <ws> --name <name> --events <comma-separated> --url <url> --secret <hmac-secret> [--id <id>] [--collection-scope <comma-separated>] [--filter <json>]
+# internal_write action (instead of --url/--secret):
+rekor triggers create --database <ws> --name <name> --events document.created --collection-scope appointments \
+  --action '{"type":"internal_write","target":"slots","match":{"source_field":"data.slot_id"},"patch":{"status":"busy"},"precondition":{"field":"data.status","op":"eq","value":"free"},"mode":"async"}'
 rekor triggers list --database <ws>
 rekor triggers get <id> --database <ws>
 rekor triggers delete <id> --database <ws>
 rekor triggers deliveries --database <ws> [--status <pending|delivered|failed|dead>] [--trigger-id <id>]
 ```
 
-`--events` is a **comma-separated** list (not a JSON array). Valid events: `document.created`, `document.updated`, `document.deleted`, `document.cancelled`, `relationship.created`, `relationship.updated`, `relationship.deleted` — e.g. `--events document.created,document.updated`. (Bare names like `create`/`update` will silently never match.) `--secret` (required) is the HMAC signing secret receivers verify with. `--collection-scope` limits firing to specific collections (omit for all).
+`--events` is a **comma-separated** list (not a JSON array). Valid events: `document.created`, `document.updated`, `document.deleted`, `document.cancelled`, `relationship.created`, `relationship.updated`, `relationship.deleted` — e.g. `--events document.created,document.updated`. (Bare names like `create`/`update` will silently never match.) For a webhook, `--secret` is the HMAC signing secret receivers verify with. `--collection-scope` limits firing to specific collections (omit for all). An `internal_write` target document stays available as long as a trigger references it.
 
 Add `--filter '<json>'` to fire only on documents matching a condition — the same filter DSL queries use, evaluated against the document (or relationship) being written, e.g. `--filter '{"field":"data.status","op":"eq","value":"paid"}'` fires only when `status` is `paid`. Combine conditions with `and`/`or` groups. A malformed filter is rejected at create time.
 
