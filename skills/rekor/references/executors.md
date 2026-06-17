@@ -25,8 +25,8 @@ mapping — **no executor required**. Build an executor only when:
 - an external-source call can't be a direct HTTP request Rekor makes itself — mutual-TLS, SOAP or raw
   TCP, binary per-tenant credentials, multi-call orchestration, or heavier processing.
 
-An executor always *receives* Rekor's outbound dispatches (triggers and external sources). **Hooks are the
-reverse direction** — your executor calls a hook to write results back *into* Rekor, which Rekor
+An executor always *receives* Rekor's outbound dispatches (triggers and external sources). **Inbound webhooks are the
+reverse direction** — your executor calls an inbound webhook to write results back *into* Rekor, which Rekor
 receives. One `rekor-sdk` covers both sides: `createExecutor` verifies what Rekor sent you; `signRequest`
 signs what you send back.
 
@@ -85,11 +85,11 @@ key (so an at-least-once delivery never double-acts), and a normalized error env
 - **Return the normalized error envelope** `{ status, code, message, retriable }` (throw `ExecutorError`).
 - **Keep secrets and PII out of logs.**
 - **Write results back** — return them inline (sync), or for a slow/async action POST the result to a
-  Rekor **hook**. Sign that write-back with the SDK's `signRequest` (the inverse of the verify side):
+  Rekor **inbound webhook**. Sign that write-back with the SDK's `signRequest` (the inverse of the verify side):
 
   ```ts
   import { signRequest } from 'rekor-sdk'
-  const url = 'https://api.rekor.pro/v1/<db>/hooks/<hook_id>/ingest'
+  const url = 'https://api.rekor.pro/v1/<db>/inbound-webhooks/<inbound_webhook_id>/ingest'
   const body = JSON.stringify({ collection: 'results', data: { /* ... */ } })
   const headers = await signRequest({ secret: process.env.REKOR_HOOK_SECRET!, method: 'POST', url, body })
   await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body })

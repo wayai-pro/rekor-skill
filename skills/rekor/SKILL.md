@@ -5,7 +5,7 @@ description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
   collection, working in preview and promoting to production, querying documents via SQL,
-  managing relationships, uploading file attachments, configuring hooks/triggers/batch
+  managing relationships, uploading file attachments, configuring inbound webhooks/triggers/batch
   operations, backing a collection with an external API (external sources), storing
   credentials in the secret vault, importing or exporting tool definitions across
   providers (OpenAI/Anthropic/Google/MCP), creating curated MCP Factory endpoints,
@@ -22,7 +22,7 @@ You have access to the `rekor` CLI — the builder interface for Rekor. Use it t
 
 - Drive Rekor through the **`rekor` CLI** when you have shell access. If you also have `mcp__rekor__*` tools in your toolset, prefer the CLI for setup and configuration; reserve MCP tools for production read/write operations.
 - Only provide information from this skill, tool descriptions, or reference documentation. Do not invent URLs, paths, commands, or flags.
-- Schema work (collections, hooks, triggers, MCP Factory endpoints) only happens in **preview** databases. Always create or use a preview before changing schemas.
+- Schema work (collections, inbound webhooks, triggers, MCP Factory endpoints) only happens in **preview** databases. Always create or use a preview before changing schemas.
 - **Promotion is human-only.** When schema is ready, surface the exact `rekor databases promote` command and wait for the user to run it.
 - Tokens are shown only **once on creation**. Always tell the user to copy and store it before doing anything else.
 - Never auto-commit. Show the user `git diff` (when working with schema files) and wait for approval.
@@ -77,7 +77,7 @@ Set `REKOR_DATABASE=<id>` in the user's shell to avoid passing `--database` on e
 
 ### 4. Create a preview environment
 
-Schema changes (collections, hooks, triggers, MCP Factory endpoints) are blocked in production databases. Create a preview to do schema work:
+Schema changes (collections, inbound webhooks, triggers, MCP Factory endpoints) are blocked in production databases. Create a preview to do schema work:
 
 ```bash
 rekor databases create-preview <id> --name "<preview-slug>"
@@ -215,16 +215,16 @@ rekor databases tag <id> --tags <comma-separated>
 rekor databases delete <id>
 rekor databases create-preview <prod-id> --name <preview-slug> [--description <desc>]
 rekor databases list-previews <prod-id>
-rekor databases promote <prod-id> --from <preview-id> [--dry-run] [--collections <ids>] [--triggers <ids>] [--hooks <ids>]
+rekor databases promote <prod-id> --from <preview-id> [--dry-run] [--collections <ids>] [--triggers <ids>] [--inbound-webhooks <ids>]
 rekor databases promotions <prod-id>
 rekor databases rollback <prod-id> --promotion <promotion-id>
 ```
 
-Tags let you group databases (e.g., `client:acme,billing`). Filter with `--tag`. Promotion is **human-only** (see Environments). Promote selectively with `--collections`/`--triggers`/`--hooks` (omit to promote everything). `promotions` lists prior promotions; `rollback` reverts one by ID.
+Tags let you group databases (e.g., `client:acme,billing`). Filter with `--tag`. Promotion is **human-only** (see Environments). Promote selectively with `--collections`/`--triggers`/`--inbound-webhooks` (omit to promote everything). `promotions` lists prior promotions; `rollback` reverts one by ID.
 
 ### Config as Code (pull / push)
 
-Manage a database's whole config — collections, relationship types, hooks, triggers, MCP endpoints — as version-controlled YAML files instead of one-off commands. Files live under `rekor-ws/databases/<db>/`, one file per entity, so changes review cleanly in a pull request.
+Manage a database's whole config — collections, relationship types, inbound webhooks, triggers, MCP endpoints — as version-controlled YAML files instead of one-off commands. Files live under `rekor-ws/databases/<db>/`, one file per entity, so changes review cleanly in a pull request.
 
 ```bash
 rekor pull <preview>                 # write the preview's config to rekor-ws/databases/<preview>/
@@ -234,7 +234,7 @@ rekor push <preview> --prune         # also delete entities that exist on the se
 
 - **Previews only.** `pull`/`push` operate on **preview** databases (config is never edited directly in production). `pull` refuses a production database. To ship, run `rekor databases promote` as usual.
 - **Auto-create a preview.** Scaffold `rekor-ws/databases/<name>/database.yaml` with `origin_database_id: <prod-id>` (and no `database_id`); `rekor push` creates the preview from that production database, writes the new id back, and applies your files.
-- **Secrets are never written to files.** Hook/trigger and external-source secrets are stripped on `pull`. On `push`, a newly added hook/trigger gets a fresh secret (printed once — save it); existing secrets are left untouched. Manage secret values with `rekor hooks` / `rekor triggers` / `rekor secrets`.
+- **Secrets are never written to files.** Inbound-webhook/trigger and external-source secrets are stripped on `pull`. On `push`, a newly added inbound webhook/trigger gets a fresh secret (printed once — save it); existing secrets are left untouched. Manage secret values with `rekor inbound-webhooks` / `rekor triggers` / `rekor secrets`.
 - **Deletions are opt-in.** Because deleting a collection also removes its documents, `push` is additive by default: entities missing from your files are reported but kept. Add `--prune` to delete them.
 - **Renaming a collection is re-seed, not in-place.** A collection's `id` is its identity and must equal its filename (`collections/<id>.yaml`), so renaming means updating **both** the filename and the inner `id:` field together (changing only one errors; or delete the inner `id:` so it defaults to the filename). Either way it's a **create-new + orphan-old**, not an in-place rename: the diff shows `+ <new>` / `- <old>`, `push` creates a new **empty** collection, and the old one (with all its documents) is left untouched — documents do **not** migrate. To rename and keep the data: (1) `push` to create the new empty collection, (2) re-seed its documents (e.g. `rekor documents upsert`, or batch), then (3) `push --prune` to delete the orphaned old collection, which cascades its documents. The same filename-is-`id` rule applies to relationship types and the other config entities.
 
@@ -402,20 +402,20 @@ rekor query-relationships <collection> <id> --database <ws> [--type <type>] [--d
 
 The `--type` must be a declared relationship type. `--data` is validated against that type's schema.
 
-### Hooks (inbound webhooks)
+### Inbound Webhooks (data in)
 
-External systems push data into Rekor via hooks. Each hook provides a unique ingest URL.
+External systems push data into Rekor via inbound webhooks. Each one provides a unique ingest URL.
 
 ```bash
-rekor hooks create --database <ws> --name <name> --secret <hmac-secret> [--id <id>] [--collection-scope <comma-separated>]
-rekor hooks list --database <ws>
-rekor hooks get <id> --database <ws>
-rekor hooks delete <id> --database <ws>
+rekor inbound-webhooks create --database <ws> --name <name> --secret <hmac-secret> [--id <id>] [--collection-scope <comma-separated>]
+rekor inbound-webhooks list --database <ws>
+rekor inbound-webhooks get <id> --database <ws>
+rekor inbound-webhooks delete <id> --database <ws>
 ```
 
-`--secret` is the HMAC shared secret the sender signs ingest requests with (required). Ingest accepts either **Signing v1** — `X-Rekor-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Rekor-Timestamp` Rekor checks for freshness (the same scheme triggers and proxied calls use, so one signer works both directions) — or a legacy body-only HMAC for older senders. A v1 delivery is idempotent: a duplicate (a retry or replay carrying the same `X-Rekor-Id`) replays the first response instead of writing again. `--collection-scope` restricts which collections the hook may write to (omit for all). Hooks can only be created/deleted in preview databases. Promote to production when ready.
+`--secret` is the HMAC shared secret the sender signs ingest requests with (required). Ingest accepts either **Signing v1** — `X-Rekor-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Rekor-Timestamp` Rekor checks for freshness (the same scheme triggers and proxied calls use, so one signer works both directions) — or a legacy body-only HMAC for older senders. A v1 delivery is idempotent: a duplicate (a retry or replay carrying the same `X-Rekor-Id`) replays the first response instead of writing again. `--collection-scope` restricts which collections the inbound webhook may write to (omit for all). Inbound webhooks can only be created/deleted in preview databases. Promote to production when ready.
 
-### Triggers (outbound webhooks)
+### Triggers (data out)
 
 Triggers fire automatically when documents change, notifying external systems via HTTP POST.
 
@@ -431,13 +431,13 @@ rekor triggers deliveries --database <ws> [--status <pending|delivered|failed|de
 
 Add `--filter '<json>'` to fire only on documents matching a condition — the same filter DSL queries use, evaluated against the document (or relationship) being written, e.g. `--filter '{"field":"data.status","op":"eq","value":"paid"}'` fires only when `status` is `paid`. Combine conditions with `and`/`or` groups. A malformed filter is rejected at create time.
 
-Triggers are HMAC-signed (`X-Rekor-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Rekor-Timestamp` the receiver checks for freshness — the same scheme proxied requests use) and carry `X-Rekor-Id`/`X-Rekor-Delivery-Id` for receiver dedupe. Delivery is reliable — failed attempts are retried with backoff and dead-lettered after repeated failure; inspect status with `rekor triggers deliveries`. By default, writes from hooks don't re-fire triggers (`skip_hook_writes: true`). Triggers can only be created/deleted in preview databases.
+Triggers are HMAC-signed (`X-Rekor-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Rekor-Timestamp` the receiver checks for freshness — the same scheme proxied requests use) and carry `X-Rekor-Id`/`X-Rekor-Delivery-Id` for receiver dedupe. Delivery is reliable — failed attempts are retried with backoff and dead-lettered after repeated failure; inspect status with `rekor triggers deliveries`. By default, writes from inbound webhooks don't re-fire triggers (`skip_inbound_webhook_writes: true`). Triggers can only be created/deleted in preview databases.
 
 ### Executors (acting on the outside world)
 
 Rekor records, signs, and dispatches — but the actual outside-world action (calling a third-party API, presenting a client certificate, running logic Rekor can't) happens in an **executor**: a small, stateless HTTP service you deploy and point a trigger or external source at. Rekor signs every dispatched request; the executor verifies it, does the work, and writes the result back.
 
-**Do you even need one?** A plain REST/JSON API → just an external source (no executor). Build an executor only when a trigger runs custom logic, or a source call can't be a direct HTTP request (mTLS, SOAP, binary creds, heavy processing). Hooks go the other way — your executor calls a hook to write results back in.
+**Do you even need one?** A plain REST/JSON API → just an external source (no executor). Build an executor only when a trigger runs custom logic, or a source call can't be a direct HTTP request (mTLS, SOAP, binary creds, heavy processing). Inbound webhooks go the other way — your executor calls an inbound webhook to write results back in.
 
 **Always receive these requests with the `rekor-sdk` package — never hand-roll signature verification** (a mistake lets anyone forge a request to your executor). The SDK verifies the signature + timestamp, dedupes retries on the idempotency key, and normalizes errors — you write one handler:
 
@@ -723,7 +723,7 @@ rekor tokens list
 rekor tokens revoke <token_id>
 ```
 
-**Permissions**: `read:documents`, `write:documents`, `read:collections`, `write:collections`, `read:relationships`, `write:relationships`, `read:attachments`, `write:attachments`, `read:hooks`, `write:hooks`, `read:triggers`, `write:triggers`, `read:endpoints`, `write:endpoints`, `read:databases`, `write:databases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), or `*` for all.
+**Permissions**: `read:documents`, `write:documents`, `read:collections`, `write:collections`, `read:relationships`, `write:relationships`, `read:attachments`, `write:attachments`, `read:inbound_webhooks`, `write:inbound_webhooks`, `read:triggers`, `write:triggers`, `read:endpoints`, `write:endpoints`, `read:databases`, `write:databases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), or `*` for all.
 
 **Scope fields**: `databases` (required), `collections` (optional — omit for all), `environments` (optional — `production`, `preview`, or omit for both).
 
@@ -801,7 +801,7 @@ Databases are either **production** or **preview**. As an agent, you can:
 
 - **Read** from any database (production or preview)
 - **Write documents and relationships** to any database
-- **Modify schemas** (collections, triggers, hooks) only in preview databases
+- **Modify schemas** (collections, triggers, inbound webhooks) only in preview databases
 
 To modify schemas, create a preview database first:
 
@@ -859,7 +859,7 @@ The principles above are agent-layer and backend-neutral; these are the specific
 
 - **Use external IDs** for idempotent upserts — retry-safe, no duplicates.
 - **One database per context** — keeps data isolated (per test run, per agent, per environment).
-- **Preview for schema changes** — modify collections, triggers, hooks in a preview database. Ask a human to promote.
+- **Preview for schema changes** — modify collections, triggers, inbound webhooks in a preview database. Ask a human to promote.
 - **Batch for atomicity** — when multiple writes must succeed or fail together.
 - **Relationships over nested data** — link documents instead of embedding. Enables traversal and flexible queries.
 - **Attachments for large or binary content** — document data and relationship metadata are for structured JSON and are capped at ~1 MiB. Store PDFs, images, and other files as attachments (`rekor attachments upload <collection> <id> --filename <name> --file <path>`) and reference them from the document; inlining base64 blobs is rejected.
