@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.7.0
+version: 1.8.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -493,7 +493,7 @@ Each source defines:
 - `timeout_ms` — per-request upstream timeout (default 10s, max 30s); a timeout surfaces as a transient error so `stale_if_error` can serve a cached value.
 - `breaker` — per-source circuit breaker: `{failure_threshold, cooldown_ms}`. After `failure_threshold` consecutive transient failures (default 5) the source opens and short-circuits calls for `cooldown_ms` (default 30s) before a single half-open probe. Always on; this only tunes it.
 
-URLs must be absolute `https` and tokens may appear only in the path/query (never the host) — an SSRF guard rejects otherwise.
+URLs must be absolute `https` (or `http` only when the source sets `allow_insecure_http: true`, for a legacy/on-prem upstream without TLS) and tokens may appear only in the path/query (never the host) — an SSRF guard rejects otherwise.
 
 **Worked example — a non-REST / legacy upstream** (all-POST verb paths, a form body, a `{ success, dados }` envelope, a constant tenant id, and `dd/mm/yyyy` dates) configured as a **direct** source — no executor:
 
