@@ -104,7 +104,7 @@ Write some test documents to the preview, query them, iterate until the schema i
 
 ```bash
 rekor documents upsert <slug> --database <id>--<preview-slug> --data '{...}'
-rekor sql "SELECT * FROM documents WHERE database_id = {database_id:String} AND collection = '<slug>' AND deleted = false" --database <id>--<preview-slug>
+rekor sql "SELECT * FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = '<slug>' AND deleted = false" --database <id>--<preview-slug>
 ```
 
 When ready, surface the promotion command for the user to run (you cannot promote yourself):
@@ -169,7 +169,7 @@ rekor documents upsert invoices --database my-ws \
 ### 3. Query documents
 
 ```bash
-rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false ORDER BY total DESC" --database my-ws
+rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false ORDER BY total DESC" --database my-ws
 ```
 
 ### 4. Declare a relationship type, then link documents
@@ -347,7 +347,7 @@ rekor sql "<query>" --database <ws> [--param key=value ...] [--file query.sql]
 
 The `organization` table exposes org-level metadata (e.g. plan/status) and requires an `{org_id:String}` predicate instead of `{database_id:String}`.
 
-**Important**: Always include `database_id = {database_id:String}` and `deleted = false`. The `documents` table also carries `archived` and `cancelled` boolean columns — add `archived = false` to query only active documents. Queries always see the latest version of each row — the server handles deduplication.
+**Important**: Always include BOTH `org_id = {org_id:String}` AND `database_id = {database_id:String}`, plus `deleted = false`. Both scoping predicates are mandatory — a database id is unique per-org, not globally, so `org_id` is required to isolate your data. Both placeholders are bound server-side from your authenticated org and database. The `documents` table also carries `archived` and `cancelled` boolean columns — add `archived = false` to query only active documents. Queries always see the latest version of each row — the server handles deduplication.
 
 **Accessing JSON fields**: Use `data.field.:Type` subcolumn syntax for the native JSON type. Use `CAST(data.field, 'Type')` when type-safe conversion is needed (e.g., integers stored as Int64 vs Float64).
 
@@ -355,26 +355,26 @@ The `organization` table exposes org-level metadata (e.g. plan/status) and requi
 
 ```bash
 # Simple query
-rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status FROM documents WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false" --database my-ws
+rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false" --database my-ws
 
 # Aggregation
-rekor sql "SELECT data.status.:String as status, count() as cnt FROM documents WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY status" --database my-ws
+rekor sql "SELECT data.status.:String as status, count() as cnt FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY status" --database my-ws
 
 # Array aggregation (sum embedded line items)
-rekor sql "SELECT data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false" --database my-ws
+rekor sql "SELECT data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false" --database my-ws
 
 # Explode array elements with ARRAY JOIN
-rekor sql "SELECT item.description.:String as item, sum(CAST(item.amount, 'Float64')) as revenue FROM documents ARRAY JOIN data.line_items[] as item WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY item ORDER BY revenue DESC" --database my-ws
+rekor sql "SELECT item.description.:String as item, sum(CAST(item.amount, 'Float64')) as revenue FROM documents ARRAY JOIN data.line_items[] as item WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY item ORDER BY revenue DESC" --database my-ws
 
 # CTE joining documents with relationships
-rekor sql "WITH inv AS (SELECT id, data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE database_id = {database_id:String} AND collection = 'invoices' AND deleted = false), pay AS (SELECT target_id, sum(CAST(data.allocated, 'Float64')) as paid FROM relationships WHERE database_id = {database_id:String} AND rel_type = 'payment_for' AND deleted = false GROUP BY target_id) SELECT inv.num, inv.total, coalesce(pay.paid, 0) as paid, inv.total - coalesce(pay.paid, 0) as balance FROM inv LEFT JOIN pay ON pay.target_id = inv.id ORDER BY balance DESC" --database my-ws
+rekor sql "WITH inv AS (SELECT id, data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false), pay AS (SELECT target_id, sum(CAST(data.allocated, 'Float64')) as paid FROM relationships WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND rel_type = 'payment_for' AND deleted = false GROUP BY target_id) SELECT inv.num, inv.total, coalesce(pay.paid, 0) as paid, inv.total - coalesce(pay.paid, 0) as balance FROM inv LEFT JOIN pay ON pay.target_id = inv.id ORDER BY balance DESC" --database my-ws
 
 # With parameters
-rekor sql "SELECT * FROM documents WHERE database_id = {database_id:String} AND data.status.:String = {status:String} AND deleted = false" --database my-ws --param status=issued
+rekor sql "SELECT * FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND data.status.:String = {status:String} AND deleted = false" --database my-ws --param status=issued
 
 # Fuzzy / approximate text match, ranked by closeness (power-user form of `documents query --filter {op:search}`).
 # Fold case + accents on BOTH sides so "São" matches "sao"; jaroWinklerSimilarity suits short names.
-rekor sql "SELECT *, jaroWinklerSimilarity(lowerUTF8(data.car_model.:String), lowerUTF8({q:String})) AS score FROM documents WHERE database_id = {database_id:String} AND collection = 'vehicles' AND deleted = false AND score >= 0.85 ORDER BY score DESC LIMIT 10" --database my-ws --param q='honda civic'
+rekor sql "SELECT *, jaroWinklerSimilarity(lowerUTF8(data.car_model.:String), lowerUTF8({q:String})) AS score FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'vehicles' AND deleted = false AND score >= 0.85 ORDER BY score DESC LIMIT 10" --database my-ws --param q='honda civic'
 ```
 
 ### Relationship Types
