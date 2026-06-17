@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.5.0
+version: 1.6.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -419,7 +419,7 @@ rekor inbound-webhooks delete <id> --database <ws>
 
 Triggers fire automatically when documents change. A trigger's action is one of:
 - **webhook** — an HMAC-signed HTTP POST to an external system (`--url`/`--secret`).
-- **internal_write** — Rekor updates a *referenced* document for you, with no external service. On a matching write it locates a target document and applies a guarded patch (an optional compare-and-set `precondition` so the update only lands when the target is still in the expected state). Ideal for "when A changes, update related B" — e.g. booking an appointment flips its slot to busy only if it was free. Pass it via `--action` (see below); document.created/updated only.
+- **internal_write** — Rekor updates a *referenced* document for you, with no external service. On a matching write it locates a target document and applies a guarded patch (an optional compare-and-set `precondition` so the update only lands when the target is still in the expected state). Ideal for "when A changes, update related B" — e.g. booking an appointment flips its slot to busy only if it was free. Pass it via `--action` (see below); document.created/updated only. Two modes: **`async`** applies the patch just after the triggering write (eventual; a precondition miss is recorded but the triggering write still stands), and **`transactional`** applies it atomically *with* the triggering write — if the `precondition` misses, the whole write is rejected and rolled back (nothing is created). Use `transactional` when the two writes must succeed or fail together (e.g. don't create the appointment unless the slot was free).
 
 ```bash
 rekor triggers create --database <ws> --name <name> --events <comma-separated> --url <url> --secret <hmac-secret> [--id <id>] [--collection-scope <comma-separated>] [--filter <json>]
