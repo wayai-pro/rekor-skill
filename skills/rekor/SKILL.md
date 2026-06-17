@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.6.0
+version: 1.7.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -23,6 +23,7 @@ You have access to the `rekor` CLI — the builder interface for Rekor. Use it t
 - Drive Rekor through the **`rekor` CLI** when you have shell access. If you also have `mcp__rekor__*` tools in your toolset, prefer the CLI for setup and configuration; reserve MCP tools for production read/write operations.
 - Only provide information from this skill, tool descriptions, or reference documentation. Do not invent URLs, paths, commands, or flags.
 - Schema work (collections, inbound webhooks, triggers, MCP Factory endpoints) only happens in **preview** databases. Always create or use a preview before changing schemas.
+- **Identifiers are permanent.** The `id` of a database, collection, relationship type, and MCP Factory endpoint *is* its identity and is **immutable** — chosen once at creation and never renamed. Display names and descriptions stay editable, but never the `id` (a relationship type has no separate name — its `id` is also its label). There is no rename: to "rename" one of these you create a new entity and migrate its data (the old one is left untouched). So choose clear, stable, lowercase-slug ids up front (e.g. `patients`, `treated_by`).
 - **Promotion is human-only.** When schema is ready, surface the exact `rekor databases promote` command and wait for the user to run it.
 - Tokens are shown only **once on creation**. Always tell the user to copy and store it before doing anything else.
 - Never auto-commit. Show the user `git diff` (when working with schema files) and wait for approval.
