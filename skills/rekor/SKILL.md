@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.3.1
+version: 1.4.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -468,8 +468,18 @@ rekor collections upsert invoices --database my-ws--preview --name "Invoices" \
 Each source defines:
 - `name` — must equal the document's `external_source`.
 - `auth` — header + value template; the secret can be inline or a `vault:<name>` reference.
-- `field_mapping` — `to_external` / `to_rekor` maps between your schema and the upstream's field names (simple renames or rich rules with value maps, transforms, defaults).
-- `get` / `list` / `create` / `update` / `delete` — per-operation endpoint templates (`url` with `{{external_id}}`, `{{query.*}}`, `{{data.*}}` tokens; `method`; `response_path` / `total_path` to extract the body).
+- `field_mapping` — `to_external` / `to_rekor` maps between your schema and the upstream's field names. A value is either a simple rename (`"status": "invoice_status"`) or a rich rule `{ path, values, default, transform, date_format, array_mode }`:
+  - `transform` — `lowercase` / `uppercase` / `trim` / `to_string` / `to_number` / `to_boolean` / `iso_date`.
+  - `values` — an enum map (`{ "active": "ACTIVE" }`), reversed automatically on the way back.
+  - `default` — value used when the field is missing.
+  - `array_mode` — `first` / `last` / `flatten` for array-valued paths.
+  - `date_format` (+ optional `rekor_format`, default ISO) — bidirectional date/time reshaping between the external wire format and Rekor's canonical. Tokens `yyyy MM dd HH mm ss` + separators, e.g. `date_format: "dd/MM/yyyy"` (⇄ ISO date) or `date_format: "HH:mm:ss"` with `rekor_format: "HH:mm"` (truncate seconds).
+  - Rich rules don't auto-invert — supply an explicit `to_rekor` entry for the reverse direction.
+- `get` / `list` / `create` / `update` / `delete` — per-operation endpoint templates. Each has its own `url` (with `{{external_id}}`, `{{query.*}}`, `{{data.*}}`, `{{auth.org_id}}`, `{{auth.database_id}}` tokens) and `method` (any of GET/POST/PUT/PATCH/DELETE) — so **RPC-style verb paths and all-POST upstreams work directly**, e.g. `list: { url: ".../listar_x", method: "POST" }`, `create: { url: ".../incluir_x", method: "POST" }`. `response_path` / `total_path` extract records/count from an envelope (e.g. `response_path: "dados"` pulls the array out of `{ ..., dados: [...] }`).
+- **Static constants** need no special field: bake constant **query** params into the `url` (`".../listar?clinica=35"`), and put constant non-secret **headers** in `endpoint.headers` (`{ "X-Tenant": "35" }`). For a constant **body** param use `static_body` (below); for a secret use `injections`.
+- `request_encoding` — `json` (default) or `form` to send `application/x-www-form-urlencoded` bodies for legacy form-post upstreams.
+- `success_path` / `message_path` — for upstreams that return HTTP 200 even on logical failure (`{ "success": false, "message": "..." }`). When `success_path` resolves falsy, the call surfaces as an error carrying the `message_path` text instead of being mistaken for data. (Dot-paths, like `response_path` — not JSONPath.)
+- `static_body` — constant, non-secret params merged into every body-bearing request (incl. POST-based reads), e.g. a fixed tenant id the agent never supplies. Agent data and `injections` win on a key collision.
 - `injections` — extra per-request vault secrets placed into a header or body field (for upstreams needing their own credential).
 - `executor_secrets` — named vault credentials an executor pulls at dispatch, for a binary or large per-tenant credential it can't take inline (e.g. an mTLS client certificate). Each `{name, secret_ref}` declares a `vault:<name>` reference (templating only `{{auth.org_id}}`/`{{auth.database_id}}`); each pull is short-lived and single-use, scoped to the calling database.
 - `cache_ttl` (seconds) + `stale_if_error` — read-through caching, optionally serving the last-known value on a transient upstream failure.
@@ -478,6 +488,25 @@ Each source defines:
 - `breaker` — per-source circuit breaker: `{failure_threshold, cooldown_ms}`. After `failure_threshold` consecutive transient failures (default 5) the source opens and short-circuits calls for `cooldown_ms` (default 30s) before a single half-open probe. Always on; this only tunes it.
 
 URLs must be absolute `https` and tokens may appear only in the path/query (never the host) — an SSRF guard rejects otherwise.
+
+**Worked example — a non-REST / legacy upstream** (all-POST verb paths, a form body, a `{ success, dados }` envelope, a constant tenant id, and `dd/mm/yyyy` dates) configured as a **direct** source — no executor:
+
+```json
+{
+  "name": "legacy",
+  "auth": { "header": "Authorization", "value_template": "Bearer {{secret}}", "secret_ref": "vault:legacy-key" },
+  "request_encoding": "form",
+  "static_body": { "clinica": "35" },
+  "success_path": "success",
+  "message_path": "message",
+  "list":   { "url": "https://api.legacy.example/listar_agendamentos", "method": "POST", "response_path": "dados", "total_path": "total" },
+  "create": { "url": "https://api.legacy.example/incluir_agendamento",  "method": "POST", "response_path": "dados" },
+  "field_mapping": {
+    "to_external": { "date": { "path": "data", "date_format": "dd/MM/yyyy" }, "patient": "paciente" },
+    "to_rekor":    { "data": { "path": "date", "date_format": "dd/MM/yyyy" }, "paciente": "patient" }
+  }
+}
+```
 
 ### Batch (atomic)
 
