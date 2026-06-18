@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.10.0
+version: 1.11.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -258,7 +258,7 @@ Deleting a collection also removes all of its documents (and any relationships p
 ```bash
 rekor documents upsert <collection> --database <ws> --data <json|@file> [--id <uuid>] [--external-id <id>] [--external-source <src>]
 rekor documents get <collection> <id> --database <ws>
-rekor documents query <collection> --database <ws> [--filter <json|@file>] [--sort <json>] [--fields <list>] [--limit <n>] [--offset <n>]
+rekor documents query <collection> --database <ws> [--filter <json|@file>] [--sort <json>] [--fields <list>] [--limit <n>] [--offset <n>] [--external-source <src>]
 rekor documents delete <collection> <id> --database <ws>
 rekor documents history <id> --database <ws> [--limit <n>] [--offset <n>] [--diff]
 ```
@@ -482,7 +482,8 @@ Each source defines:
   - `date_format` (+ optional `rekor_format`, default ISO) — bidirectional date/time reshaping between the external wire format and Rekor's canonical. Tokens `yyyy MM dd HH mm ss` + separators, e.g. `date_format: "dd/MM/yyyy"` (⇄ ISO date) or `date_format: "HH:mm:ss"` with `rekor_format: "HH:mm"` (truncate seconds).
   - Rich rules don't auto-invert — supply an explicit `to_rekor` entry for the reverse direction.
 - `get` / `list` / `create` / `update` / `delete` — per-operation endpoint templates. Each has its own `url` (with `{{external_id}}`, `{{query.*}}`, `{{data.*}}`, `{{auth.org_id}}`, `{{auth.database_id}}` tokens) and `method` (any of GET/POST/PUT/PATCH/DELETE) — so **RPC-style verb paths and all-POST upstreams work directly**, e.g. `list: { url: ".../listar_x", method: "POST" }`, `create: { url: ".../incluir_x", method: "POST" }`. `response_path` / `total_path` extract records/count from an envelope (e.g. `response_path: "dados"` pulls the array out of `{ ..., dados: [...] }`).
-- `id_path` — dot-path to the `external_id` within each **raw** upstream record, for upstreams keyed on a domain field rather than `id`/`_id` (e.g. `id_path: "codigo"`, `"identifiers.cpf"`). Applies to LIST (per row) and CREATE (from the response). When unset, the id is taken from the first present conventional key (`id`/`_id`/`Id`/`ID`/`uuid`/`key`). **Set this when your upstream has no conventional id field — otherwise a LIST whose rows all lack a resolvable `external_id` fails loud with a `422 EXTERNAL_CONFIG` naming the fix and the row keys it saw (a partial drop returns the resolvable rows plus a `meta.dropped_no_id` count), and CREATE fails to identify the new document.**
+- `id_path` — dot-path to the `external_id` within each **raw** upstream record, for upstreams keyed on a domain field rather than `id`/`_id` (e.g. `id_path: "codigo"`, `"identifiers.cpf"`). Applies to LIST (per row) and CREATE (from the response). When unset, the id is taken from the first present conventional key (`id`/`_id`/`Id`/`ID`/`uuid`/`key`). **Set this when your upstream has no conventional id field — otherwise a LIST whose rows all lack a resolvable `external_id` fails loud with a `422 EXTERNAL_CONFIG` naming the fix and the row keys it saw (a partial drop returns the resolvable rows plus a `meta.dropped_no_id` count), and CREATE fails to identify the new document.** For an upstream whose identity is composed of several fields with no single natural id, `id_path` may instead be a **template** joining fields, e.g. `id_path: "{{entity}}::{{date}}::{{time}}"`; a composite id is **list-only** (rejected at config-write when `get`/`create`/`update`/`delete` is also configured, since it can't address a single row by id).
+- `forward_filters` (on the `list` endpoint) — opt in to forward the agent's filter conditions to the upstream so a proxied `list`/`query` can pass a search key, a date, a parent id, etc. `fields` is the allowlist of Rekor field names that may be forwarded (each translated to the upstream's name/value via `field_mapping`); `target` (`query` for a GET, `body` for a POST/PUT/PATCH list — inferred from the method when omitted) chooses where they go. Without it, a proxied query still **rejects** any `--filter`/MCP `filter`. Currently forwards exact-match (`eq`) conditions only — a single `eq` or a flat AND of `eq`s; any other operator or shape is rejected with an actionable error rather than silently returning unfiltered data, e.g. `"list": { "url": ".../search", "method": "GET", "forward_filters": { "fields": ["email"] } }`.
 - **Static constants** need no special field: bake constant **query** params into the `url` (`".../listar?clinica=35"`), and put constant non-secret **headers** in `endpoint.headers` (`{ "X-Tenant": "35" }`). For a constant **body** param use `static_body` (below); for a secret use `injections`.
 - `request_encoding` — `json` (default) or `form` to send `application/x-www-form-urlencoded` bodies for legacy form-post upstreams.
 - `success_path` / `message_path` — for upstreams that return HTTP 200 even on logical failure (`{ "success": false, "message": "..." }`). When `success_path` resolves falsy, the call surfaces as an error carrying the `message_path` text instead of being mistaken for data. (Dot-paths, like `response_path` — not JSONPath.)
