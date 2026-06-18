@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.14.0
+version: 1.15.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -491,6 +491,7 @@ Each source defines:
 - `request_encoding` — `json` (default) or `form` to send `application/x-www-form-urlencoded` bodies for legacy form-post upstreams.
 - `success_path` / `message_path` — for upstreams that return HTTP 200 even on logical failure (`{ "success": false, "message": "..." }`). When `success_path` resolves falsy, the call surfaces as an error carrying the `message_path` text instead of being mistaken for data. (Dot-paths, like `response_path` — not JSONPath.)
 - `static_body` — constant, non-secret params merged into every body-bearing request (incl. POST-based reads), e.g. a fixed tenant id the agent never supplies. Agent data and `injections` win on a key collision.
+- `body_template` (per `create`/`update`/`delete` endpoint) — map of body field → templated string, interpolated against the same per-op tokens as that endpoint's `url` (`{{external_id}}`, `{{data.*}}`, `{{query.*}}`, `{{auth.org_id}}`/`{{auth.database_id}}`) and merged into the request body. Use it to put the document id — or any addressable value — **into** the body for RPC/legacy upstreams that key the update/cancel verb by id in the body rather than the URL, e.g. `"update": { …, "body_template": { "agendamento_id": "{{external_id}}" } }`. Body-bearing ops only — create/update, and a `delete` whose method carries a body (POST/PUT/PATCH); rejected on get/list and on any GET/DELETE-method endpoint (no body to carry it). Unlike `static_body` (constants, never templated) its values are filled per request; on a key collision agent data is overlaid by `body_template`, and `injections` win over both. Values are filled as **strings** (the same as `url`/header tokens) — for a numeric/boolean field an upstream is strict about, send it through `field_mapping` or `static_body` instead.
 - `injections` — extra per-request vault secrets placed into a header or body field (for upstreams needing their own credential).
 - `executor_secrets` — named vault credentials an executor pulls at dispatch, for a binary or large per-tenant credential it can't take inline (e.g. an mTLS client certificate). Each `{name, secret_ref}` declares a `vault:<name>` reference (templating only `{{auth.org_id}}`/`{{auth.database_id}}`); each pull is short-lived and single-use, scoped to the calling database.
 - `cache_ttl` (seconds) + `stale_if_error` — read-through caching, optionally serving the last-known value on a transient upstream failure.
