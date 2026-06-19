@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.17.0
+version: 1.18.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -408,13 +408,19 @@ The `--type` must be a declared relationship type. `--data` is validated against
 External systems push data into Rekor via inbound webhooks. Each one provides a unique ingest URL.
 
 ```bash
-rekor inbound-webhooks create --database <ws> --name <name> --secret <hmac-secret> [--id <id>] [--collection-scope <comma-separated>]
+rekor inbound-webhooks create --database <ws> --name <name> --secret <hmac-secret> [--id <id>] [--collection-scope <comma-separated>] [--field-mapping <json>] [--source-binding <json>]
 rekor inbound-webhooks list --database <ws>
 rekor inbound-webhooks get <id> --database <ws>
 rekor inbound-webhooks delete <id> --database <ws>
 ```
 
 `--secret` is the HMAC shared secret the sender signs ingest requests with (required). Ingest accepts either **Signing v1** — `X-Rekor-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Rekor-Timestamp` Rekor checks for freshness (the same scheme triggers and proxied calls use, so one signer works both directions) — or a legacy body-only HMAC for older senders. A v1 delivery is idempotent: a duplicate (a retry or replay carrying the same `X-Rekor-Id`) replays the first response instead of writing again. `--collection-scope` restricts which collections the inbound webhook may write to (omit for all). Inbound webhooks can only be created/deleted in preview databases. Promote to production when ready.
+
+**Translate the received payload before write.** By default an inbound webhook stores the payload as-is. To store **canonical** documents straight from an external system's raw shape, attach a mapping — the same `field_mapping` contract external sources use (renames, value maps, date reformatting, computed/compose), applied in the inbound direction:
+- `--source-binding '{"collection":"<id>","source":"<name>"}'` reuses an existing source's `field_mapping`, so the same translation that proxies that collection's reads/writes also canonicalizes inbound deliveries — one contract, both directions.
+- `--field-mapping '{"to_external":{"status":"state"}}'` is an inline mapping for a purely-native collection with no source. `to_external` renames auto-invert on read (upstream `state` → Rekor `status`); or give `to_rekor`/`computed` explicitly.
+
+The two are mutually exclusive. The mapping is validated when the webhook is created and again at promotion (a `source_binding` must still resolve to a source that has a `field_mapping`). This makes an executor-free **native-mirror sync** complete: pair an inbound webhook's `to_rekor` with an `external_write` trigger's `to_external` to keep a native collection in sync with a plain-HTTP upstream in both directions, reusing a single source contract.
 
 ### Triggers (data out)
 
