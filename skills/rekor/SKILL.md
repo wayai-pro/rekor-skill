@@ -675,6 +675,24 @@ When the typed params cover everything an agent needs, set `"expose_filter": fal
 
 The list tool's machinery params (`sort`, `limit`, `offset`, `fields`) can each be hidden the same way — `"expose_sort"`/`"expose_limit"`/`"expose_offset"`/`"expose_fields": false` — and given a server-side default (`"default_sort"`/`"default_limit"`/`"default_fields"`) that still applies when the param is hidden. `"default_fields"` takes the same shape as the `fields` param — a comma-separated string (`"external_id,data.name"`) or an array (`["external_id", "data.name"]`). A hidden `limit` surfaces a `"truncated"` flag in the response if it caps the result, so rows are never silently dropped. `"agent_minimal": true` is a preset that hides all of them (plus `filter`) with a generous default limit, leaving an inputSchema that is pure typed semantics; any explicit `expose_*`/`default_*` on the same tool overrides the preset.
 
+**Curated write surface (`writable_fields`)**: the write-side mirror of `filterable_fields`. On a `create`/`update` tool, list exactly the fields the tool may set — an allowlist that does two things at once:
+
+- **Least-privilege / intent-scoped tools.** A field the agent sends that isn't on the list is rejected with an actionable error. So a front-desk tool can be barred from ever setting a price or internal field, and you can split one operation into intent tools — a `confirm` tool allowed to set only `status` and a `reschedule` tool allowed to set only the time — instead of relying on prose to fence them.
+- **A rich, typed write schema.** The tool's `data` parameter is generated from the collection schema for just those fields — their types, enums, formats, `required`, and descriptions — instead of a generic "any object" slot. The agent gets the same typed, described, validated guidance on writes that `filterable_fields` gives on reads.
+
+```json
+{
+  "collection": "appointments",
+  "operations": ["update"],
+  "names": { "update": "reschedule_appointment" },
+  "writable_fields": [
+    { "field": "start_time", "param": "when", "description": "New start time (ISO 8601)" }
+  ]
+}
+```
+
+Per field you may set `param` (rename the key the agent sets in `data` — the tool maps it back to the real field) and `description` (override the field's description). Fields are **top-level only** (writes merge at the top level — a partial update changes just the fields you send and leaves the rest untouched; nested objects are replaced whole). The collection schema stays the validation source of truth — `writable_fields` shapes *which* fields the tool exposes and *how they're described*, it doesn't re-validate values. Omit `writable_fields` to keep the generic any-field `data` slot. A tool with `writable_fields` but no `create`/`update` operation is rejected at config-write.
+
 **Conditional writes (`precondition`)**: give a `create`/`update` tool a `precondition` — a Filter DSL expression checked against the document's **current** state before the write applies. If it doesn't hold, the write is rejected with a 409 conflict and nothing changes; if it holds, the write proceeds. This turns a fragile read-then-write into one correct, race-free call: model a bookable slot as a document and make "book it" a guarded update, so two agents can't both book the same slot.
 
 ```json
@@ -714,7 +732,7 @@ Connect agents to the endpoint URL with a token scoped to exactly one database. 
 
 For least-privilege, mint a token bound to the endpoint in one step: `rekor tokens create-for-endpoint <slug> --database <db>` (or pass `--mint-token` to `rekor endpoints upsert`). An endpoint-bound token's authorization IS the endpoint's tool surface — exactly those collections and operations, relationships, batch, and SQL only if you enabled it, nothing else — so a leaked token can't reach beyond the tools you exposed, and you can rotate or revoke one per agent.
 
-Endpoints can only be created/modified in preview databases. Promote to production when ready. Promotion is blocked if it would break a published endpoint — removing a collection or relationship type the endpoint exposes, or a field its typed filters or a `precondition` depend on — so promote the endpoint together with the schema change (a dry run lists any such conflicts first).
+Endpoints can only be created/modified in preview databases. Promote to production when ready. Promotion is blocked if it would break a published endpoint — removing a collection or relationship type the endpoint exposes, or a field its typed filters, `writable_fields`, or a `precondition` depend on — so promote the endpoint together with the schema change (a dry run lists any such conflicts first).
 
 **Which database serves the endpoint:** `mcp.rekor.pro/e/{slug}/mcp` resolves the endpoint from the database your **token** is scoped to. So:
 
@@ -856,7 +874,7 @@ The command reference above is the *mechanics*. This is how to **combine** them 
 
 1. **One intent = one atomic write.** An action that takes N separate writes is N chances to drop one and leave the system half-updated. Collapse a single user intent into a single write; when one intent genuinely spans multiple documents, use `rekor batch` so they all commit or all roll back.
 2. **State lives on the entity — don't duplicate it.** Keep each piece of state in exactly one place, on the entity it describes. Mirroring a status onto a second document forces the agent to update both in sync, recreating the multi-write problem. Link or query the source of truth instead of copying its fields.
-3. **Expose the job, nothing more.** An agent-facing tool should express the task and nothing else. Push machinery — sort, limit, offset, field selection, the raw filter DSL — into endpoint config with `expose_*: false` plus server-side `default_*` (or the `agent_minimal` preset). The agent fills meaning via typed `filterable_fields`, not plumbing.
+3. **Expose the job, nothing more.** An agent-facing tool should express the task and nothing else. Push machinery — sort, limit, offset, field selection, the raw filter DSL — into endpoint config with `expose_*: false` plus server-side `default_*` (or the `agent_minimal` preset). The agent fills meaning via typed `filterable_fields` on reads and `writable_fields` on writes (the tool sees only the fields its job sets), not plumbing.
 4. **Guards belong in config, not arguments.** Enforce invariants server-side where the agent can't forget them, not as instructions it must follow. A `precondition` makes a state-dependent write race-free and invisible to the agent; schema `required` + enums reject malformed input. The rejection message is the recovery channel — keep it legible and actionable so the agent self-corrects.
 5. **Narrow the input space.** Every degree of freedom is a way to get it wrong. Constrain with enums (a closed set to pick from), typed `filterable_fields` (native params instead of free-form filter strings), stable `external_id` keys (idempotent upsert, no invented ids), and `x-fk` on writes (a reference must resolve to a real document).
 6. **Model for the fallible agent, not the ideal one.** Agents skip steps, send empty strings for fields they didn't fill, and invent ids. `required` rejects the missing field, enums reject the made-up value, `x-fk` rejects the invented reference, `precondition` rejects the out-of-order write — each turns a silent corruption into a clear, correctable error.
