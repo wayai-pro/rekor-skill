@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.16.0
+version: 1.17.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -421,19 +421,23 @@ rekor inbound-webhooks delete <id> --database <ws>
 Triggers fire automatically when documents change. A trigger's action is one of:
 - **webhook** — an HMAC-signed HTTP POST to an external system (`--url`/`--secret`).
 - **internal_write** — Rekor updates a *referenced* document for you, with no external service. On a matching write it locates a target document and applies a guarded patch (an optional compare-and-set `precondition` so the update only lands when the target is still in the expected state). Ideal for "when A changes, update related B" — e.g. booking an appointment flips its slot to busy only if it was free. Pass it via `--action` (see below); document.created/updated only. Two modes: **`async`** applies the patch just after the triggering write (eventual; a precondition miss is recorded but the triggering write still stands), and **`transactional`** applies it atomically *with* the triggering write — if the `precondition` misses, the whole write is rejected and rolled back (nothing is created). Use `transactional` when the two writes must succeed or fail together (e.g. don't create the appointment unless the slot was free).
+- **external_write** — Rekor writes the changed document *out* to an external system by reusing an external source's write path — its field translation, endpoint, body shape, and auth — with no executor. Use it to keep a native collection mirrored to a legacy API: store records natively in Rekor and have each write pushed upstream in the upstream's own shape. The action names the source: `{type:"external_write","collection":"<source-owner>","source":"<name>","op":"create"}`. `collection` is the collection that *defines* the source (a native mirror points at a sibling source-backed collection; defaults to the triggering collection if omitted); `op` defaults from the event (created→create, updated→update, deleted→delete) and is overridable. On a **create**, Rekor reads the upstream-assigned id from the response and links it back onto the triggering document as its `external_id` (so the native record points at its upstream counterpart, and retries don't duplicate) — opt out with `link_external_id:false`. Updates/deletes are dispatched only for documents already linked to that source. Delivery is async, signed, retried, and dead-lettered like a webhook (inspect with `rekor triggers deliveries`); document.created/updated/deleted only.
 
 ```bash
 rekor triggers create --database <ws> --name <name> --events <comma-separated> --url <url> --secret <hmac-secret> [--id <id>] [--collection-scope <comma-separated>] [--filter <json>]
 # internal_write action (instead of --url/--secret):
 rekor triggers create --database <ws> --name <name> --events document.created --collection-scope appointments \
   --action '{"type":"internal_write","target":"slots","match":{"source_field":"data.slot_id"},"patch":{"status":"busy"},"precondition":{"field":"data.status","op":"eq","value":"free"},"mode":"async"}'
+# external_write action — mirror a native collection's writes out through a source's write path:
+rekor triggers create --database <ws> --name <name> --events document.created,document.updated --collection-scope appointments \
+  --action '{"type":"external_write","collection":"upstream_appointments","source":"legacy","op":"create"}'
 rekor triggers list --database <ws>
 rekor triggers get <id> --database <ws>
 rekor triggers delete <id> --database <ws>
 rekor triggers deliveries --database <ws> [--status <pending|delivered|failed|dead>] [--trigger-id <id>]
 ```
 
-`--events` is a **comma-separated** list (not a JSON array). Valid events: `document.created`, `document.updated`, `document.deleted`, `document.cancelled`, `relationship.created`, `relationship.updated`, `relationship.deleted` — e.g. `--events document.created,document.updated`. (Bare names like `create`/`update` will silently never match.) For a webhook, `--secret` is the HMAC signing secret receivers verify with. `--collection-scope` limits firing to specific collections (omit for all). An `internal_write` target document stays available as long as a trigger references it.
+`--events` is a **comma-separated** list (not a JSON array). Valid events: `document.created`, `document.updated`, `document.deleted`, `document.cancelled`, `relationship.created`, `relationship.updated`, `relationship.deleted` — e.g. `--events document.created,document.updated`. (Bare names like `create`/`update` will silently never match.) For a webhook, `--secret` is the HMAC signing secret receivers verify with. `--collection-scope` limits firing to specific collections (omit for all). An `internal_write` target document stays available as long as a trigger references it. For `external_write`, the referenced source is validated at create time (the named collection, source, and write endpoint for each op must exist) — and referencing a source from a trigger never turns the triggering collection into a proxy; it stays native.
 
 Add `--filter '<json>'` to fire only on documents matching a condition — the same filter DSL queries use, evaluated against the document (or relationship) being written, e.g. `--filter '{"field":"data.status","op":"eq","value":"paid"}'` fires only when `status` is `paid`. Combine conditions with `and`/`or` groups. A malformed filter is rejected at create time.
 
@@ -443,7 +447,7 @@ Triggers are HMAC-signed (`X-Rekor-Signature: v1,<hex>` over id+timestamp+method
 
 Rekor records, signs, and dispatches — but the actual outside-world action (calling a third-party API, presenting a client certificate, running logic Rekor can't) happens in an **executor**: a small, stateless HTTP service you deploy and point a trigger or external source at. Rekor signs every dispatched request; the executor verifies it, does the work, and writes the result back.
 
-**Do you even need one?** A plain REST/JSON API → just an external source (no executor). Build an executor only when a trigger runs custom logic, or a source call can't be a direct HTTP request (mTLS, SOAP, binary creds, heavy processing). Inbound webhooks go the other way — your executor calls an inbound webhook to write results back in.
+**Do you even need one?** A plain REST/JSON API → just an external source (no executor) — and the same source's write path can be reused *outbound* by an `external_write` trigger, so mirroring a native collection to a plain-HTTP upstream needs no executor either. Build an executor only when a trigger runs custom logic, or a source call can't be a direct HTTP request (mTLS, SOAP, binary creds, heavy processing). Inbound webhooks go the other way — your executor calls an inbound webhook to write results back in.
 
 **Always receive these requests with the `rekor-sdk` package — never hand-roll signature verification** (a mistake lets anyone forge a request to your executor). The SDK verifies the signature + timestamp, dedupes retries on the idempotency key, and normalizes errors — you write one handler:
 
