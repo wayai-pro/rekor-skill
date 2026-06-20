@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.21.0
+version: 1.22.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -433,6 +433,8 @@ rekor inbound-webhooks create --database <ws> --name orders-ref --secret <token>
 ```
 
 On a delivery, Rekor reads the record id from the thin body (`id_path`), calls the bound source's read endpoint to pull the full record, canonicalizes it through the source's `field_mapping`, and upserts it by `external_id` — the inbound twin of a proxied read. The event field (`event_path` + `event_map`) routes to upsert or delete (a delete skips the fetch and removes the mirrored record); everything else defaults to upsert. The fetch + write happen **asynchronously** with automatic retry/backoff, so the sender gets an immediate accept; check progress with `rekor inbound-webhooks deliveries --database <ws>`. Requires `--source-binding` (it provides the read endpoint) and a single native `--collection-scope`. **Security:** Rekor only ever fetches the *source-configured* URL with the extracted id — a callback URL inside the payload is ignored, never followed. Reference-style senders typically pair with `--ingest-auth` (a static header), since they don't sign each delivery.
+
+**Keep your own fields on re-sync — `merge`.** By default each re-sync replaces the whole document, so any field you added locally (a workflow status, tag, score, assignment, internal note) is overwritten. Add `"merge":true` to `--hydration` and a re-sync refreshes **only** the fields the source's mapping owns and **preserves** everything else you put on the document — so one collection can hold both the upstream mirror *and* your local enrichment, and you can still list/filter the entity by your own field (e.g. `status=qualified`). The first sync still creates the record from the mapped fields; a field the upstream later clears is reflected; the merged document is still schema-validated. Example: `--hydration '{"id_path":"record_id","merge":true}'`.
 
 ### Triggers (data out)
 
