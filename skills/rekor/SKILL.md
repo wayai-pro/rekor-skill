@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.20.0
+version: 1.21.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -421,6 +421,18 @@ rekor inbound-webhooks delete <id> --database <ws>
 - `--field-mapping '{"to_external":{"status":"state"}}'` is an inline mapping for a purely-native collection with no source. `to_external` renames auto-invert on read (upstream `state` → Rekor `status`); or give `to_rekor`/`computed` explicitly.
 
 The two are mutually exclusive. The mapping is validated when the webhook is created and again at promotion (a `source_binding` must still resolve to a source that has a `field_mapping`). This makes an executor-free **native-mirror sync** complete: pair an inbound webhook's `to_rekor` with an `external_write` trigger's `to_external` to keep a native collection in sync with a plain-HTTP upstream in both directions, reusing a single source contract.
+
+**Hydrating webhooks (notification + fetch).** Many systems send *reference-style* webhooks — "record X changed, here is its id" — instead of the full record (Stripe recommends re-fetching by id; Shopify, Salesforce, HubSpot, legacy CRMs do the same). Point such a webhook at a collection's read source and Rekor will **fetch the full record itself** on each delivery, then store the canonical document:
+
+```bash
+rekor inbound-webhooks create --database <ws> --name orders-ref --secret <token> \
+  --collection-scope orders \
+  --source-binding '{"collection":"orders","source":"shop_api"}' \
+  --ingest-auth '{"type":"static_header","header":"X-Account-Key"}' \
+  --hydration '{"id_path":"record_id","event_path":"event","event_map":{"ResourceDeleted":"delete"}}'
+```
+
+On a delivery, Rekor reads the record id from the thin body (`id_path`), calls the bound source's read endpoint to pull the full record, canonicalizes it through the source's `field_mapping`, and upserts it by `external_id` — the inbound twin of a proxied read. The event field (`event_path` + `event_map`) routes to upsert or delete (a delete skips the fetch and removes the mirrored record); everything else defaults to upsert. The fetch + write happen **asynchronously** with automatic retry/backoff, so the sender gets an immediate accept; check progress with `rekor inbound-webhooks deliveries --database <ws>`. Requires `--source-binding` (it provides the read endpoint) and a single native `--collection-scope`. **Security:** Rekor only ever fetches the *source-configured* URL with the extracted id — a callback URL inside the payload is ignored, never followed. Reference-style senders typically pair with `--ingest-auth` (a static header), since they don't sign each delivery.
 
 ### Triggers (data out)
 
