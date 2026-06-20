@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.19.0
+version: 1.20.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -408,13 +408,13 @@ The `--type` must be a declared relationship type. `--data` is validated against
 External systems push data into Rekor via inbound webhooks. Each one provides a unique ingest URL.
 
 ```bash
-rekor inbound-webhooks create --database <ws> --name <name> --secret <hmac-secret> [--id <id>] [--collection-scope <comma-separated>] [--field-mapping <json>] [--source-binding <json>]
+rekor inbound-webhooks create --database <ws> --name <name> --secret <hmac-secret> [--id <id>] [--collection-scope <comma-separated>] [--field-mapping <json>] [--source-binding <json>] [--ingest-auth <json>]
 rekor inbound-webhooks list --database <ws>
 rekor inbound-webhooks get <id> --database <ws>
 rekor inbound-webhooks delete <id> --database <ws>
 ```
 
-`--secret` is the HMAC shared secret the sender signs ingest requests with (required). Ingest accepts either **Signing v1** — `X-Rekor-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Rekor-Timestamp` Rekor checks for freshness (the same scheme triggers and proxied calls use, so one signer works both directions) — or a legacy body-only HMAC for older senders. A v1 delivery is idempotent: a duplicate (a retry or replay carrying the same `X-Rekor-Id`) replays the first response instead of writing again. `--collection-scope` restricts which collections the inbound webhook may write to (omit for all). Inbound webhooks can only be created/deleted in preview databases. Promote to production when ready.
+`--secret` is the shared secret (required). By default the sender signs ingest requests and Rekor verifies an HMAC: either **Signing v1** — `X-Rekor-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Rekor-Timestamp` Rekor checks for freshness (the same scheme triggers and proxied calls use, so one signer works both directions) — or a legacy body-only HMAC for older senders. A v1 delivery is idempotent: a duplicate (a retry or replay carrying the same `X-Rekor-Id`) replays the first response instead of writing again. For senders that authenticate with a **static per-account header** instead of signing each request, `--ingest-auth '{"type":"static_header","header":"X-Account-Key"}'` verifies that header's value against `--secret` (constant-time) — Rekor compares the configured header rather than a signature. `--collection-scope` restricts which collections the inbound webhook may write to (omit for all). Inbound webhooks can only be created/deleted in preview databases. Promote to production when ready.
 
 **Translate the received payload before write.** By default an inbound webhook stores the payload as-is. To store **canonical** documents straight from an external system's raw shape, attach a mapping — the same `field_mapping` contract external sources use (renames, value maps, date reformatting, computed/compose), applied in the inbound direction:
 - `--source-binding '{"collection":"<id>","source":"<name>"}'` reuses an existing source's `field_mapping`, so the same translation that proxies that collection's reads/writes also canonicalizes inbound deliveries — one contract, both directions.
