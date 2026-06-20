@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.22.0
+version: 1.23.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -402,6 +402,35 @@ rekor query-relationships <collection> <id> --database <ws> [--type <type>] [--d
 ```
 
 The `--type` must be a declared relationship type. `--data` is validated against that type's schema.
+
+### Integration Modeling (canonical-first)
+
+The integration edges below — inbound webhooks, triggers, and external sources — connect a collection to an external system. This is how to decide *which* edge to use and how to shape the entity behind it. Companion to the **Modeling Principles for Agent Consumption** section (near the end), which shapes the agent-facing tool surface; this shapes how the data is backed.
+
+**The one rule: model the entity canonically first — agnostic to any integration — then decide, per operation, how it's backed.** The collection IS the entity: a clean schema with business-named properties, sensible enums and defaults — never the upstream payload's shape. Integration lives at declarative edges, never smeared into the schema or tool surface. A consumer (an agent, a query) should not be able to tell whether a field is rekor-native or mirrored from a legacy system.
+
+- **Model the canonical first.** Derive the schema and tool surface from the domain and the agents' real journeys, not from any backend's payload. Put each business rule at the most reliable layer it fits — schema (enums, `required`, defaults) > trigger (reactive invariant) > tool constraint (`writable_fields`/`precondition`) > prompt — and never encode an enforceable data invariant as a prompt rule. Right-grain it: model only what the journeys touch and extend additively (speculative schema is harder to remove than to add).
+- **Swap-test.** If re-backing an entity (legacy → native → a different system) would force a schema or tool-surface change, the model leaked the integration — fix the model. Only an integration-agnostic model is swappable: the same canonical contract can be served natively in one database and proxied to a legacy API in another by swapping only the source's `field_mapping`. Backfill catalog gaps the legacy system lacks with native collections in the same database, exposed through the same endpoint.
+- **Native vs proxy is a per-COLLECTION choice; a source's operation blocks declare which operations the upstream exposes.** A collection with no sources is native (all CRUD local); a collection with a source is proxy-backed — every write goes upstream and reads resolve against the upstream (it stores nothing locally). The source's `list`/`get`/`create`/`update`/`delete` blocks pick *which* operations the upstream supports (read-only `get`/`list`, or full read-write); an operation the source omits is **unsupported**, not silently native. You don't split native and proxy across the operations of one collection — you mix them across collections: **one MCP endpoint freely composes native-backed and proxy-backed tools** (a proxied `invoices` beside native `plans`/`activities` you backfilled).
+- **Don't route native-vs-proxy per tool or per field.** Two tools on the same op route identically; `writable_fields` restricts *which* fields a tool writes, never *where*. A "native read + proxy write on one collection" mix is a read-consistency hole (the native read won't reflect the proxy write until something syncs it) — and once you add that sync, native-write + an `external_write` trigger is strictly better. The two coherent shapes are **all-proxy** or **all-native + sync**; the per-tool mix is the incoherent middle.
+- **Prefer the native mirror; reach for proxy only when forced.** A native collection kept in sync gives local query/join/filter, speed, transactional writes, audit, and availability decoupled from the upstream. Choose proxy-on-read only when staleness is unacceptable, a write must be synchronously confirmed by the upstream system of record, or the dataset is too large/cold to mirror.
+- **Hybrid entities (mirrored fields + a rekor-owned overlay) live in ONE collection.** A field the upstream lacks (a workflow `status`, a tag, a score) belongs on the same document as the mirrored fields — integrated query/filter demands it (you can't `list where status=X` if `status` lives in another collection). Splitting an entity to separate ownership trades a real query capability for bookkeeping; don't. Exception: an overlay that is itself a richer entity with its own lifecycle/history → a related collection + relationship. A scalar attribute is never a reason to split.
+- **`field_mapping` is one bidirectional contract, reused at every edge.** The same source contract powers proxy reads, write-through, inbound-webhook hydration (`source_binding`), and `external_write` out. Define the translation once; the edges reuse it.
+- **Reference webhooks: hydrate via the source's `get`, never follow the payload's callback.** Most mature webhooks are reference-style ("record X changed, go fetch it") — small payload, no stale snapshot, self-correcting ordering. Resolve them by extracting the id and fetching through the bound source's `get`. A payload-supplied callback URL is an SSRF vector and is ignored.
+
+**Pattern catalog** — pick the edge by what the upstream offers and what you need:
+
+| Pattern | Source / edge shape | Reads | Writes | Use when |
+|---|---|---|---|---|
+| **Native** | `sources: []` | local | local | rekor owns the data |
+| **Proxy-read** | source `list`/`get` | live upstream | — | freshness-critical or too-big-to-mirror reference data |
+| **Write-through** | source `create`/`update` (+ `get`/`list` to read) | live upstream | → upstream (id returned) | upstream is system of record; you want synchronous confirmation, no local mirror |
+| **Push-synced mirror** | hydrating inbound webhook + bound source `get` | local | local | upstream pushes change notifications; you want local query of a fresh mirror |
+| **Bidirectional mirror** | hydration in (`merge`) + `external_write` trigger out (`watched_fields`) | local | local (→ upstream via trigger) | a hybrid entity synced both ways, all-native tools |
+
+The **bidirectional mirror** is the idiomatic home for a hybrid entity: one native collection, all-native tools, sync as declarative edges. Use hydration `merge` so a re-sync refreshes only the mapping-owned fields and preserves your overlay, and `external_write` `watched_fields: "mapped"` so an overlay-only change doesn't push a no-op upstream. The hydration write target must be **native** (no source) — the out-edge is the `external_write` trigger, not a proxy write on the same collection — and `skip_inbound_webhook_writes` keeps a re-sync from re-firing the trigger (no loop).
+
+**Identity keys.** Catalog / reference entities (plans, activities, locations) → key by a stable **slug** that doubles as `external_id`, so cross-collection `x-fk` references resolve. People / relations (members, bookings, enrollments) → key by rekor's internal **uuid**.
 
 ### Inbound Webhooks (data in)
 
@@ -882,7 +911,7 @@ When you're done, ask a human operator to promote your changes:
 
 ## Modeling Principles for Agent Consumption
 
-The command reference above is the *mechanics*. This is how to **combine** them so an agent-backed app is reliable. The mechanics make almost any shape possible; these principles pick the shape that makes a fallible LLM agent succeed. They are domain-neutral — apply them whether you model invoices, appointments, or tickets.
+The command reference above is the *mechanics*. This is how to **combine** them so an agent-backed app is reliable. The mechanics make almost any shape possible; these principles pick the shape that makes a fallible LLM agent succeed. They are domain-neutral — apply them whether you model invoices, appointments, or tickets. These shape the agent-facing tool surface; for how to **back** an entity (native, proxied, mirrored) and shape the integration edges, see **Integration Modeling (canonical-first)** above.
 
 **The one rule: model it so the right thing is the only easy thing to express, and the wrong thing is impossible.** The gap between an agent that systematically drops steps and one that runs a clean full lifecycle is usually the *shape* of the schema and tools — not the prompt or the model.
 
