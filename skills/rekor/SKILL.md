@@ -214,7 +214,8 @@ rekor databases create <id> --name <name> [--description <desc>] [--tags <comma-
 rekor databases rename <id> --name <new-name>   # display name only — the id/slug is immutable
 rekor databases tag <id> --tags <comma-separated>
 rekor databases delete <id>
-rekor databases create-preview <prod-id> --name <preview-slug> [--description <desc>]
+rekor databases create-preview <prod-id> --name <preview-slug> [--description <desc>] [--integrations <enabled|disabled>]
+rekor databases update <preview-id> --integrations <enabled|disabled>   # preview-only eval toggle
 rekor databases list-previews <prod-id>
 rekor databases promote <prod-id> --from <preview-id> [--dry-run] [--collections <ids>] [--triggers <ids>] [--inbound-webhooks <ids>]
 rekor databases promotions <prod-id>
@@ -222,6 +223,8 @@ rekor databases rollback <prod-id> --promotion <promotion-id>
 ```
 
 Tags let you group databases (e.g., `client:acme,billing`). Filter with `--tag`. Promotion is **human-only** (see Environments). Promote selectively with `--collections`/`--triggers`/`--inbound-webhooks` (omit to promote everything). `promotions` lists prior promotions; `rollback` reverts one by ID.
+
+**Eval mode (`--integrations disabled`).** A preview can run with its **external integrations disabled** (default `enabled`). When disabled, every external edge goes inert — collection sources, outbound `external_write` triggers, and inbound-webhook hydration — and the preview serves its own **seeded** data with the exact same schema, tools, and field mappings, **without calling the external systems**. That makes a preview a deterministic, prod-safe target for **agent evals**: exercise your agent's policy against the same canonical surface without polluting a production-only upstream or hitting live rate limits/PII. Seed it by writing documents while disabled (writes to source-backed collections land locally), flip to `enabled` to test the real integration, and re-clone from production to stay drift-free. **Production databases are always `enabled`** — the toggle is preview-only.
 
 ### Config as Code (pull / push)
 
