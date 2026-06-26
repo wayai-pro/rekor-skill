@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.29.0
+version: 1.30.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -244,6 +244,18 @@ rekor unbind                         # clear this worktree's database binding
 - **Secrets are never written to files.** Inbound-webhook/trigger and external-source secrets are stripped on `pull`. On `push`, a newly added inbound webhook/trigger gets a fresh secret (printed once — save it); existing secrets are left untouched. Manage secret values with `rekor inbound-webhooks` / `rekor triggers` / `rekor secrets`.
 - **Deletions are opt-in.** Because deleting a collection also removes its documents, `push` is additive by default: entities missing from your files are reported but kept. Add `--prune` to delete them.
 - **Renaming a collection is re-seed, not in-place.** A collection's `id` is its identity and must equal its filename (`collections/<id>.yaml`), so renaming means updating **both** the filename and the inner `id:` field together (changing only one errors; or delete the inner `id:` so it defaults to the filename). Either way it's a **create-new + orphan-old**, not an in-place rename: the diff shows `+ <new>` / `- <old>`, `push` creates a new **empty** collection, and the old one (with all its documents) is left untouched — documents do **not** migrate. To rename and keep the data: (1) `push` to create the new empty collection, (2) re-seed its documents (e.g. `rekor documents upsert`, or batch), then (3) `push --prune` to delete the orphaned old collection, which cascades its documents. The same filename-is-`id` rule applies to relationship types and the other config entities.
+
+### Templates
+
+Ready-made data layers you can pull and stand up in minutes — each bundles a database's collections, relationship types, and a custom MCP endpoint for an AI agent.
+
+```bash
+rekor template list                            # browse available templates
+rekor template pull <slug> [--lang en|pt|es]   # write a template's data layer into rekor-ws/databases/<slug>/
+```
+
+- **`pull` seeds a config-as-code folder.** It writes the template's collections, relationship types, and MCP endpoint into `rekor-ws/databases/<slug>/` (id defaults to the slug; override with `--database <id>`), pre-wired with an `origin_database_id` so the normal flow stands it up: `rekor databases create <id> --name "…"`, then `rekor push <id>`, then `rekor databases promote <id> --from <preview>`. Once promoted, the template's MCP endpoint is live for your agents.
+- **`--lang`** selects a localized variant; an untranslated language falls back to the default (with a note).
 
 ### Collections
 
