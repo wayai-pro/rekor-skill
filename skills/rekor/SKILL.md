@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.30.0
+version: 1.31.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -250,11 +250,13 @@ rekor unbind                         # clear this worktree's database binding
 Ready-made data layers you can pull and stand up in minutes — each bundles a database's collections, relationship types, and a custom MCP endpoint for an AI agent.
 
 ```bash
-rekor template list                            # browse available templates
-rekor template pull <slug> [--lang en|pt|es]   # write a template's data layer into rekor-ws/databases/<slug>/
+rekor template list                                       # browse available templates
+rekor template pull <slug> [--lang en|pt|es] [--dry-run]  # write a template's data layer into rekor-ws/databases/<slug>/
+rekor template pull <slug> --force                        # overwrite existing files in the target folder
 ```
 
 - **`pull` seeds a config-as-code folder.** It writes the template's collections, relationship types, and MCP endpoint into `rekor-ws/databases/<slug>/` (id defaults to the slug; override with `--database <id>`), pre-wired with an `origin_database_id` so the normal flow stands it up: `rekor databases create <id> --name "…"`, then `rekor push <id>`, then `rekor databases promote <id> --from <preview>`. Once promoted, the template's MCP endpoint is live for your agents.
+- **`pull` won't overwrite your edits.** If the target folder already has files the template would write, `pull` refuses and lists them (your other files are left untouched) — pass `--force` to overwrite, `--database <new-id>` to write elsewhere, or `--dry-run` to preview the file set first.
 - **`--lang`** selects a localized variant; an untranslated language falls back to the default (with a note).
 
 ### Collections
