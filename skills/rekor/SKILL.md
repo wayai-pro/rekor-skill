@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.31.0
+version: 1.31.1
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -869,7 +869,7 @@ rekor status                 # Auth, connectivity, and CLI version diagnostics
 rekor update                 # Update the CLI to the latest published version
 ```
 
-The CLI checks for a newer published version in the background and prints a one-line notice when an update is available. When this skill is installed in your repo, it also checks whether a newer skill is published and nudges you to run `npx skills add wayai-pro/rekor-skill -y`. Disable both checks with `REKOR_NO_UPDATE_CHECK=1` (also disabled when `NO_UPDATE_NOTIFIER` or `CI` is set).
+The CLI checks for a newer published version in the background and prints a one-line notice when an update is available. When this skill is installed in your repo, it also checks whether a newer skill is published and nudges you to run `mkdir -p .claude && npx skills add wayai-pro/rekor-skill -y`. Disable both checks with `REKOR_NO_UPDATE_CHECK=1` (also disabled when `NO_UPDATE_NOTIFIER` or `CI` is set).
 
 ### Reporting
 
