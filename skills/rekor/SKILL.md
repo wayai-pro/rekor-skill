@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.31.1
+version: 1.32.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -231,14 +231,14 @@ Tags let you group databases (e.g., `client:acme,billing`). Filter with `--tag`.
 Manage a database's whole config — collections, relationship types, inbound webhooks, triggers, MCP endpoints — as version-controlled YAML files instead of one-off commands. Files live under `rekor-ws/databases/<db>/`, one file per entity, so changes review cleanly in a pull request.
 
 ```bash
-rekor pull <preview>                 # write the preview's config to rekor-ws/databases/<preview>/
+rekor pull <preview>                 # write the preview's config + a read-only mirror of linked production
 rekor push <preview> [--dry-run]     # apply your local files to the preview (--dry-run shows the diff only)
 rekor push <preview> --prune         # also delete entities that exist on the server but not in your files
 rekor use <preview>                  # bind THIS git worktree to a database (push/pull refuse a different one)
 rekor unbind                         # clear this worktree's database binding
 ```
 
-- **Previews only.** `pull`/`push` operate on **preview** databases (config is never edited directly in production). `pull` refuses a production database. To ship, run `rekor databases promote` as usual.
+- **Previews are the only edit target.** `push` only writes **preview** databases (config is never edited directly in production). When you `pull` a preview, the linked production config is also written beside it as a **read-only reference** folder (`rekor-ws/databases/<prod>/`) so you can see the live production config while iterating — it's marked read-only (`push` refuses it and bare `pull`/`push` auto-selection ignores it). `pull <production>` directly writes only that read-only reference. To ship, run `rekor databases promote` as usual.
 - **Auto-create a preview.** Scaffold `rekor-ws/databases/<name>/database.yaml` with `origin_database_id: <prod-id>` (and no `database_id`); `rekor push` creates the preview from that production database, writes the new id back, and applies your files.
 - **Worktree binding (routing guard).** Each git checkout (main or linked worktree) can be bound to one database. `pull`/`push` refuse to run against a different database once bound — catching the common mistake of a prompt landing in the wrong terminal/worktree and clobbering another preview's config. The binding is set automatically on the first successful `pull`/`push` into an unbound checkout (and on creating a new preview), is per-worktree and never committed, and complements `.rekor.yaml` (which pins the org repo-wide). `rekor status` shows the current binding. **If `pull`/`push` errors with a binding mismatch, stop and ask the user before doing anything else** — it usually means the prompt was meant for a different worktree. Do **not** run `rekor unbind` / `rekor use` without explicit user instruction in the current session; changing the binding is a routing decision, like switching which database the user thinks you're working on.
 - **Secrets are never written to files.** Inbound-webhook/trigger and external-source secrets are stripped on `pull`. On `push`, a newly added inbound webhook/trigger gets a fresh secret (printed once — save it); existing secrets are left untouched. Manage secret values with `rekor inbound-webhooks` / `rekor triggers` / `rekor secrets`.
