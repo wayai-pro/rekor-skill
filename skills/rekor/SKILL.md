@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.32.0
+version: 1.33.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -297,34 +297,11 @@ rekor documents history <id> --database <ws> [--limit <n>] [--offset <n>] [--dif
 ] }
 ```
 
-Every field is searchable by default — `search` needs no setup. Exact filters and `search` compose in one query: put exact conditions alongside the `search` leg so the exact ones narrow the set and `search` ranks within it. To **tune** how a field is matched, set an optional `x-search` hint on that field in the collection schema:
-
-```jsonc
-"car_model": { "type": "string", "x-search": { "mode": "name" } }
-```
-
-- `mode: "name"` — short proper nouns (people, brands, plan/model names); favors close, prefix-aligned matches.
-- `mode: "text"` — free-text / multi-word fields; matches on shared word fragments.
-- `mode: "fuzzy"` — codes / SKUs / IDs where typos dominate.
-- `threshold` (0–1) — minimum closeness to return; `searchable: false` — forbid searching a field (e.g. a large free-text blob you never want scanned).
-
-Tuning is optional — unset fields use a sensible default. `x-search` hints apply to **top-level fields**; `search` still works on nested paths (e.g. `data.address.city`) using the default behavior, they just aren't individually tuned. Search runs against the latest synced data, so a document written a moment earlier may take a brief moment to appear.
+Every field is searchable by default — `search` needs no setup. Exact filters and `search` compose in one query: put exact conditions alongside the `search` leg so the exact ones narrow the set and `search` ranks within it. To **tune** how a field is matched — `x-search` modes (`name`/`text`/`fuzzy`), `threshold`, and `searchable: false` — see **`references/querying.md`**. Search runs against the latest synced data, so a document written a moment earlier may take a brief moment to appear.
 
 **Sorting.** `--sort` takes a **JSON array** of terms, each `{"field":"data.<field>","direction":"asc"|"desc"}` — e.g. `--sort '[{"field":"data.created_at","direction":"desc"}]'`. Multiple terms sort lexically (first term primary). `direction` defaults to `asc` if omitted. The colon shorthand `data.name:asc` is **not** accepted — pass the JSON array form. Omit `--sort` when using `search` to keep the relevance ranking.
 
-**Datetimes.** Declare datetime fields in the collection schema with `"format": "date-time"` (or `"format": "date"` for date-only). Rekor stores them in a single canonical form: a naive value (no offset) gets the collection's timezone attached, so `2026-06-11T13:00:00` is stored and returned as `2026-06-11T13:00:00-03:00` — the same shape from both `query` and a single-document read, with no UTC math required of you. Set the timezone with `"x-timezone": "America/Sao_Paulo"` on the collection schema, or set a database-wide default that every collection without its own `x-timezone` inherits — the resolution order is collection `x-timezone` → database `settings.timezone` → UTC. Set the database default from the CLI with `--timezone` (at create or update time), or via REST `PUT /v1/databases/<id>` with a `settings.timezone` body:
-
-```bash
-rekor databases create <database-id> --name "My DB" --timezone America/Sao_Paulo
-rekor databases update <database-id> --timezone America/Sao_Paulo
-# or via REST:
-curl -X PUT https://api.rekor.pro/v1/databases/<database-id> \
-  -H "Authorization: Bearer $REKOR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{ "settings": { "timezone": "America/Sao_Paulo" } }'
-```
-
-The value must be a valid IANA timezone (invalid names are rejected server-side). `rekor databases update --timezone` merges into the existing `settings` (it preserves other keys); the raw REST `PUT` and `--settings` flag **replace** the `settings` object wholesale, so send the full object. Omitted top-level fields (`name`, `description`, `tags`) are left unchanged on an existing database. **Filtering is instant-aware:** `eq`/`neq`/`in`/`not_in` and the range operators match datetimes by point-in-time, so the exact representation you pass (`T` vs space, with or without offset) doesn't change the result — `{ "field": "data.starts_at", "op": "eq", "value": "2026-06-11T13:00:00" }` matches the stored value regardless of how it was written. Use `eq` for an exact datetime, not `like` (which is plain substring matching). Raw `rekor sql` is **not** rewritten this way — match the canonical stored form (or prefer the Filter DSL `query` for datetime conditions).
+**Datetimes.** Declare datetime fields in the collection schema with `"format": "date-time"` (or `"format": "date"` for date-only). Rekor stores them in a single canonical form: a naive value (no offset) gets the collection's timezone attached, so `2026-06-11T13:00:00` is stored and returned as `2026-06-11T13:00:00-03:00` — the same shape from both `query` and a single-document read, with no UTC math required of you. The timezone resolves collection `x-timezone` → database `settings.timezone` → UTC. **Filtering is instant-aware:** `eq`/`neq`/`in`/`not_in` and the range operators match datetimes by point-in-time, so the exact representation you pass (`T` vs space, with or without offset) doesn't change the result. Use `eq` for an exact datetime, not `like` (plain substring). Raw `rekor sql` is **not** rewritten this way — prefer the Filter DSL `query` for datetime conditions. Setting the timezone (CLI `--timezone`, REST, merge-vs-replace `settings` semantics) is covered in **`references/querying.md`**.
 
 **Partial vs full updates.** A full upsert (`manage_document` `upsert`, REST `PUT`) writes the **whole** document — send every field. To change just one field (flip a status, set a flag) without re-sending the rest, use a **partial update**: `manage_document` `patch`, the generated `update_<collection>` tool, or REST `PATCH .../documents/<collection>/<id>`. A partial update merges the provided fields over the stored document (top-level merge; nested objects are replaced wholesale), targets an existing document by id or `external_id`, and the merged result must still satisfy the collection schema. For a collection backed by an **external source**, the provided fields are forwarded to that upstream system, which decides how the update is applied — the merge-and-keep-the-rest guarantee applies to documents stored in Rekor.
 
@@ -379,23 +356,9 @@ rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as sta
 
 # Aggregation
 rekor sql "SELECT data.status.:String as status, count() as cnt FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY status" --database my-ws
-
-# Array aggregation (sum embedded line items)
-rekor sql "SELECT data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false" --database my-ws
-
-# Explode array elements with ARRAY JOIN
-rekor sql "SELECT item.description.:String as item, sum(CAST(item.amount, 'Float64')) as revenue FROM documents ARRAY JOIN data.line_items[] as item WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY item ORDER BY revenue DESC" --database my-ws
-
-# CTE joining documents with relationships
-rekor sql "WITH inv AS (SELECT id, data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false), pay AS (SELECT target_id, sum(CAST(data.allocated, 'Float64')) as paid FROM relationships WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND rel_type = 'payment_for' AND deleted = false GROUP BY target_id) SELECT inv.num, inv.total, coalesce(pay.paid, 0) as paid, inv.total - coalesce(pay.paid, 0) as balance FROM inv LEFT JOIN pay ON pay.target_id = inv.id ORDER BY balance DESC" --database my-ws
-
-# With parameters
-rekor sql "SELECT * FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND data.status.:String = {status:String} AND deleted = false" --database my-ws --param status=issued
-
-# Fuzzy / approximate text match, ranked by closeness (power-user form of `documents query --filter {op:search}`).
-# Fold case + accents on BOTH sides so "São" matches "sao"; jaroWinklerSimilarity suits short names.
-rekor sql "SELECT *, jaroWinklerSimilarity(lowerUTF8(data.car_model.:String), lowerUTF8({q:String})) AS score FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'vehicles' AND deleted = false AND score >= 0.85 ORDER BY score DESC LIMIT 10" --database my-ws --param q='honda civic'
 ```
+
+For the full example gallery — array aggregation, `ARRAY JOIN` to explode embedded arrays, CTEs joining documents with relationships, `--param` binding, and fuzzy/`jaroWinklerSimilarity` ranked text match — see **`references/querying.md`**.
 
 ### Relationship Types
 
@@ -545,59 +508,20 @@ rekor collections upsert invoices --database my-ws--preview --name "Invoices" \
   --schema @schema.json --sources @sources.json
 ```
 
-Each source defines:
+Each source defines the menu below (full grammar, every option's rules, and a worked legacy-upstream example in **`references/external-sources.md`**):
+
 - `name` — must equal the document's `external_source`.
-- `auth` — header + value template; the secret can be inline or a `vault:<name>` reference. An **inline** secret is environment-local — promotion never copies it to production, so set it on the production database directly (a newly promoted source stays unconfigured and requests fail with a clear "no usable credential configured" error until you do). A `vault:<name>` reference travels by reference and needs no extra step.
-- `field_mapping` — **optional**; omit it for identity passthrough (the upstream object is stored as the document data verbatim, and writes send your data unchanged). When set, `to_external` / `to_rekor` map between your schema and the upstream's field names. A value is either a simple rename (`"status": "invoice_status"`) or a rich rule `{ path, values, default, transform, date_format, array_mode, target }`:
-  - `transform` — `lowercase` / `uppercase` / `trim` / `to_string` / `to_number` / `to_boolean` / `iso_date`.
-  - `values` — an enum map. **Always Rekor-keyed** (`{ "<your value>": "<upstream value>" }`, e.g. `{ "active": "ACTIVE" }`) — the *same* map serves both directions: forward (write) looks up by key, reverse (read) matches by value and returns the key. **The orientation does not flip in an explicit `to_rekor` rule** even though everything else in that rule reads upstream→Rekor (the rule key is the upstream field, `path` is your field): a `values` map stays Rekor-keyed and is reverse-matched, e.g. `to_rekor: { activity: { path: "activity_id", values: { "natacao-adulto": "8" } } }` maps an upstream `8` (or `"8"`) → `"natacao-adulto"`. As a convenience the reverse path *also* accepts the intuitive upstream-keyed form (`{ "8": "natacao-adulto" }`) when the Rekor-keyed match misses — but write the **Rekor-keyed** form to stay unambiguous (reverse-match wins on any key/value overlap). A fully backwards or mistyped map otherwise passes the raw upstream value through unchanged rather than erroring, so confirm by reading a document back after configuring.
-  - `default` — value used when the field is missing.
-  - `array_mode` — `first` / `last` / `flatten` for array-valued paths.
-  - `date_format` (+ optional `rekor_format`, default ISO) — bidirectional date/time reshaping between the external wire format and Rekor's canonical. Tokens `yyyy MM dd HH mm ss` + separators, e.g. `date_format: "dd/MM/yyyy"` (⇄ ISO date) or `date_format: "HH:mm:ss"` with `rekor_format: "HH:mm"` (truncate seconds).
-  - `target` (`to_external`, write side; default `body`) — route a mapped param to the request **query string** (`target: "query"`) instead of the body on `create`/`update`. The value map / transform / default still apply — the write-direction counterpart of `forward_filters.target`. Use it for an upstream whose create/update params are **query** (not a JSON body) and need a value translated to an upstream code, e.g. `"activity_id": { "path": "idActivity", "values": { "lash-lift": "42" }, "target": "query" }` sends `?idActivity=42`. A query-target name that collides with a param already in the endpoint's `url` is rejected at config time; each split `targets` entry can pick its own `target`.
-  - **Split one field into several upstream params** (`to_external` only) — give the rule `targets` (an array of rules) instead of a single `path` to fan one canonical field out to multiple upstream params, each with its own `path`/`transform`/`date_format`/`target`. The headline use: an upstream that wants **separate `date` + `time` params** fed from a single ISO datetime — `"starts_at": { "targets": [{ "path": "data", "date_format": "dd/MM/yyyy" }, { "path": "hora", "date_format": "HH:mm" }] }`. A split field can't be a `forward_filters` field (no single upstream name).
-  - **Destructure a composite field into several upstream params** (`to_external` only) — give the rule a `separator` plus a `parts` array (instead of a single `path` or a split `targets`) to split ONE composite canonical value on the separator and route each part to its own upstream param, each independently value-mapped / `date_format`'d / `target`'d. This is the **write-side inverse of a composite `id_path`** (and of `computed` compose): when a write tool references an entity by its composite id — e.g. `session_id = "<activity>::<date>"` — but the upstream action endpoint needs the decomposed parts as separate, independently-translated params: `"session_id": { "separator": "::", "parts": [{ "path": "idActivity", "values": { "yoga": "A1" }, "target": "query" }, { "path": "activityDate", "date_format": "dd/MM/yyyy", "target": "query" }] }` sends `?idActivity=A1&activityDate=...`. Parts are **positional by default** (segment `i` → `parts[i]`, so declare them in the same order the read-side composite id concatenates); a part with no matching segment emits its `default` or is omitted, and extra trailing segments are dropped. **Selective extraction**: give each part an explicit `segment` index to consume a chosen — possibly **non-contiguous** — segment, declaring only the parts you need. So ONE canonical id carrying a superset of identifiers (`activityCode::configId::date::time`) can serve N write actions that each need a different subset — e.g. a trial-booking endpoint keyed by `(activityCode, date)` = `[{ segment: 0, path: "idActivity" }, { segment: 2, path: "activityDate", date_format: "yyyy-MM-dd" }]`, and a makeup-booking endpoint keyed by `(configId, date)` = segments 1+2 — one resource collection, no ignored params, no per-action duplication. Per rule it's all-or-nothing: declare `segment` on **every** part or none (no mixing); declared indices are unique. Unlike a split (which routes the *same* value to every target), a destructure routes a *different* part to each. This keeps the agent-facing tool integration-agnostic: it references the entity by the same canonical composite id whether the backend is native or a proxied legacy endpoint. A destructure field can't be a `forward_filters` field (no single upstream name).
-  - **Compose / computed fields** (read side) — `computed` builds a Rekor `data.*` field from a `{{token}}` template over the **raw upstream** record (the inverse of a split, and the same template grammar as a composite `id_path`). Use it to rebuild one field from several upstream fields — `"computed": { "starts_at": { "template": "{{data}}T{{hora}}", "sources": { "data": { "date_format": "dd/MM/yyyy", "rekor_format": "yyyy-MM-dd" }, "hora": { "date_format": "HH:mm", "rekor_format": "HH:mm:ss" } } } }` rebuilds an ISO datetime from upstream `data`+`hora` — or to derive a key from siblings (`"slot_id": { "template": "{{professional_id}}::{{data}}::{{hora}}" }`). `sources` reshapes each token (same vocabulary as a `to_rekor` rule); if any token is absent the whole field is omitted. Tokens reference the upstream's own field names (no chaining over other computed fields). A token may also read a **forwarded list filter** via the reserved `{{filter.<field>}}` namespace — see `forward_filters` below — to backfill a scope key/date the upstream omits from its list rows (e.g. `"starts_at": { "template": "{{filter.date}}T{{hora_atendimento}}" }` when a list-by-date upstream returns only the time). `{{filter.*}}` populates on `list` only and a composite `id_path` may use it too; each referenced field must be in `list.forward_filters.fields`.
-  - Rich rules don't auto-invert — supply an explicit `to_rekor` entry (or a `computed` field) for the reverse direction. In that explicit `to_rekor` entry the rule key is the upstream field and `path` is your field, but a `values` map stays **Rekor-keyed** (see `values` above) — it's the one part that doesn't follow the rest of the rule's upstream→Rekor direction.
-  - **Per-operation override**: the source-level `field_mapping` applies to every op, but an RPC/legacy upstream may use *different* param names for the same field across verbs (create takes `entity_id`, update takes `id_entity`). Put a `field_mapping` on an individual `get`/`list`/`create`/`update` endpoint to override the source-level one for that op (full replacement — set every field it needs); it falls back to the source-level mapping when unset, e.g. `"update": { …, "field_mapping": { "to_external": { "owner": "id_entity" } } }`. Not allowed on `delete` (no body — set its param names in the URL template).
-- `get` / `list` / `create` / `update` / `delete` — per-operation endpoint templates. Each has its own `url` (with `{{external_id}}`, `{{query.*}}`, `{{data.*}}`, `{{current.*}}`/`{{prior.*}}` on update/delete — see below, `{{auth.org_id}}`, `{{auth.database_id}}` tokens) and `method` (any of GET/POST/PUT/PATCH/DELETE) — so **RPC-style verb paths and all-POST upstreams work directly**, e.g. `list: { url: ".../listar_x", method: "POST" }`, `create: { url: ".../incluir_x", method: "POST" }`. `response_path` / `total_path` extract records/count from an envelope (e.g. `response_path: "dados"` pulls the array out of `{ ..., dados: [...] }`).
-- **Named write bindings** (`create` / `update` / `delete` only) — when one canonical entity's writes fan out, in the backend, to **several** endpoints with different URLs/params/id-semantics (a "book trial" vs a "book makeup" that are both *creates* of the same booking), declare the write op as a **map of named variants** instead of a single endpoint: `"create": { "trial": { "url": ".../experimental-class", "method": "POST", "id_path": "idActivitySession" }, "makeup": { "url": ".../enroll", "method": "POST", "id_path": "{{data.member_id}}::{{data.session_id}}" } }`. Each binding is a full endpoint (its own `url`/`method`/`field_mapping`/`id_path`/`body_template`/`response_path`/`headers`) and **shares the source's transport** (`auth`/`injections`/`signing`/`breaker`/`cache`/`request_encoding`/`static_body`). The caller selects one **by name** per write — at the MCP Factory layer via a tool's `bindings` (below), so the canonical collection stays ONE collection instead of shattering into one-per-endpoint. A `default` binding is used when no name is selected (e.g. an `external_write` trigger's dispatch, which selects none — so a source used as an `external_write` target must give the targeted op a single endpoint or a `default` binding). Reads (`get`/`list`) don't fan out — they stay a single endpoint. The single-endpoint form is the default; selecting a binding name that the op doesn't declare (or naming one on a single-endpoint op) is rejected at config-write and again at promotion.
-- `id_path` — dot-path to the `external_id` within each **raw** upstream record, for upstreams keyed on a domain field rather than `id`/`_id` (e.g. `id_path: "codigo"`, `"identifiers.cpf"`). Applies to LIST (per row) and CREATE (from the response). When unset, the id is taken from the first present conventional key (`id`/`_id`/`Id`/`ID`/`uuid`/`key`). **Set this when your upstream has no conventional id field — otherwise a LIST whose rows all lack a resolvable `external_id` fails loud with a `422 EXTERNAL_CONFIG` naming the fix and the row keys it saw (a partial drop returns the resolvable rows plus a `meta.dropped_no_id` count), and CREATE fails to identify the new document.** For an upstream whose identity is composed of several fields with no single natural id, `id_path` may instead be a **template** joining fields, e.g. `id_path: "{{entity}}::{{date}}::{{time}}"`; a composite id is **list-only** (rejected at config-write when `get`/`create`/`update`/`delete` is also configured, since it can't address a single row by id). For an RPC-style upstream that returns the new record's server-assigned id on **CREATE** under a *different* field than the one keying LIST rows, set a **create-only** `id_path` on the `create` endpoint (e.g. `"create": { …, "id_path": "created_ref" }`) — it overrides the source-level `id_path` for the create read-back and falls back to it when unset. For an **action/RPC write endpoint that returns no addressable entity** (an empty body, or a bare envelope like `{ "result": "ok" }`), make the create-only `id_path` a **request template** over the create inputs instead — `"create": { …, "id_path": "{{data.member_id}}::{{data.enrollment_id}}::{{data.date}}" }` — and Rekor derives the `external_id` from the request data. Identical inputs map to the same id, so a repeated identical action upserts the same document rather than duplicating. Its tokens must be `{{data.<field>}}` naming declared collection fields, and the source must be create-only (a list is fine) — a request-templated create id can't address a single row, so `get`/`update`/`delete` are rejected at config-write.
-- `forward_filters` (on the `list` endpoint) — opt in to forward the agent's filter conditions to the upstream so a proxied `list`/`query` can pass a search key, a date, a parent id, etc. `fields` is the allowlist of Rekor field names that may be forwarded (each translated to the upstream's name/value via `field_mapping`); `target` (`query` for a GET, `body` for a POST/PUT/PATCH list — inferred from the method when omitted) chooses where they go. Without it, a proxied query still **rejects** any `--filter`/MCP `filter`. Currently forwards exact-match (`eq`) conditions only — a single `eq` or a flat AND of `eq`s; any other operator or shape is rejected with an actionable error rather than silently returning unfiltered data, e.g. `"list": { "url": ".../search", "method": "GET", "forward_filters": { "fields": ["email"] } }`. A forwarded value is also exposed to the read mapping as `{{filter.<field>}}` (a `computed` field or a composite `id_path`), so a row can carry the filter value the upstream leaves out of its list rows — e.g. forward `date`, then compose `starts_at` from `{{filter.date}}` + the row's time (see Compose / computed fields).
-- **Static constants** need no special field: bake constant **query** params into the `url` (`".../listar?clinica=35"`), and put constant non-secret **headers** in `endpoint.headers` (`{ "X-Tenant": "35" }`). For a constant **body** param use `static_body` (below); for a secret use `injections`.
-- `request_encoding` — `json` (default) or `form` to send `application/x-www-form-urlencoded` bodies for legacy form-post upstreams.
-- `success_path` / `message_path` — for upstreams that return HTTP 200 even on logical failure (`{ "success": false, "message": "..." }`). When `success_path` resolves falsy, the call surfaces as an error carrying the `message_path` text instead of being mistaken for data. (Dot-paths, like `response_path` — not JSONPath.)
-- `static_body` — constant, non-secret params merged into every body-bearing request (incl. POST-based reads), e.g. a fixed tenant id the agent never supplies. Agent data and `injections` win on a key collision.
-- `body_template` (per `create`/`update`/`delete` endpoint) — map of body field → templated string, interpolated against the same per-op tokens as that endpoint's `url` (`{{external_id}}`, `{{data.*}}`, `{{query.*}}`, `{{auth.org_id}}`/`{{auth.database_id}}`) and merged into the request body. Use it to put the document id — or any addressable value — **into** the body for RPC/legacy upstreams that key the update/cancel verb by id in the body rather than the URL, e.g. `"update": { …, "body_template": { "agendamento_id": "{{external_id}}" } }`. Body-bearing ops only — create/update, and a `delete` whose method carries a body (POST/PUT/PATCH); rejected on get/list and on any GET/DELETE-method endpoint (no body to carry it). Unlike `static_body` (constants, never templated) its values are filled per request; on a key collision agent data is overlaid by `body_template`, and `injections` win over both. Values are filled as **strings** (the same as `url`/header tokens) — for a numeric/boolean field an upstream is strict about, send it through `field_mapping` or `static_body` instead.
-- `{{current.*}}` / `{{prior.*}}` (in an `update`/`delete` `url`, headers, or `body_template`) — the document's **current** stored field values from the upstream, for upstreams that need the existing state on a write, not just the id + new values: optimistic concurrency (`?ifmatch={{prior.version}}`), "move"-style updates that take the OLD value plus the NEW (a reschedule taking the current `data_agendada` alongside `nova_data`), or a cancel keyed by the current field values. Rekor sources them with a pre-write read through the source's **`get`** endpoint, so a `get` is **required** when you reference one (rejected at config-write otherwise) — and the values are the **raw upstream record** (the upstream's own field names + wire format, echoed back verbatim). `prior` is an alias of `current` (a proxied write has no local merge). Update/delete only; referencing them costs one extra read per write (skipped entirely when unused). e.g. `"update": { …, "body_template": { "agendamento_id": "{{external_id}}", "data_agendada": "{{current.data_agendada}}", "nova_data": "{{data.data_agendada}}" } }`.
-- `injections` — extra per-request vault secrets placed into a header or body field (for upstreams needing their own credential).
-- `executor_secrets` — named vault credentials an executor pulls at dispatch, for a binary or large per-tenant credential it can't take inline (e.g. an mTLS client certificate). Each `{name, secret_ref}` declares a `vault:<name>` reference (templating only `{{auth.org_id}}`/`{{auth.database_id}}`); each pull is short-lived and single-use, scoped to the calling database.
-- `cache_ttl` (seconds) + `stale_if_error` — read-through caching, optionally serving the last-known value on a transient upstream failure.
-- `signing` — opt into HMAC request signing when the source points at an executor (adds `X-Rekor-Signature` + `X-Rekor-Timestamp`); omit for third-party APIs.
-- `timeout_ms` — per-request upstream timeout (default 10s, max 30s); a timeout surfaces as a transient error so `stale_if_error` can serve a cached value.
-- `breaker` — per-source circuit breaker: `{failure_threshold, cooldown_ms}`. After `failure_threshold` consecutive transient failures (default 5) the source opens and short-circuits calls for `cooldown_ms` (default 30s) before a single half-open probe. Always on; this only tunes it.
+- `auth` — header + value template; secret inline or `vault:<name>`. An **inline** secret is environment-local — promotion never copies it, so set it on production directly (a newly promoted source stays unconfigured, requests fail with a clear error, until you do). A `vault:<name>` reference travels by reference.
+- `field_mapping` — **optional** (omit for identity passthrough). `to_external`/`to_rekor` map between your schema and the upstream's field names — a simple rename or a rich rule (`transform`, `values` [always Rekor-keyed], `default`, `date_format`, `array_mode`, `target`). Advanced shapes: **split** one field to several params (`targets`), **destructure** a composite value (`separator`+`parts`), **compose** a Rekor field from several upstream fields (`computed` templates), and **per-operation overrides**.
+- `get` / `list` / `create` / `update` / `delete` — per-operation endpoint templates, each with its own `url` (tokens `{{external_id}}`, `{{query.*}}`, `{{data.*}}`, `{{current.*}}`/`{{prior.*}}`, `{{auth.*}}`) and `method` — so RPC-style verb paths and all-POST upstreams work directly. `response_path`/`total_path`/`success_path`/`message_path` unwrap envelopes.
+- **Named write bindings** (`create`/`update`/`delete`) — declare a write op as a map of named endpoint variants when one canonical entity's writes fan out to several backend endpoints; the caller picks one by name (via a tool's `bindings`), keeping ONE collection.
+- `id_path` — where the `external_id` lives in each raw upstream record (dot-path, composite template, or create-only/request-templated variants) for upstreams not keyed on `id`.
+- `forward_filters` (on `list`) — forward the agent's `eq` filter conditions upstream (allowlisted `fields`, `query`/`body` target); also exposed to read mappings as `{{filter.<field>}}`.
+- `static_body` / `body_template` / `request_encoding` — constant, templated, and form-encoded request-body shaping (e.g. put the id in the body for legacy verbs).
+- `injections` / `executor_secrets` — extra per-request vault secrets in a header/body, and named credentials an executor pulls at dispatch (e.g. an mTLS cert).
+- `cache_ttl`+`stale_if_error` / `signing` / `timeout_ms` / `breaker` — read-through caching, HMAC signing (for executors), per-request timeout, and the per-source circuit breaker.
 
-URLs must be absolute `https` (or `http` only when the source sets `allow_insecure_http: true`, for a legacy/on-prem upstream without TLS) and tokens may appear only in the path/query (never the host) — an SSRF guard rejects otherwise.
-
-**Worked example — a non-REST / legacy upstream** (all-POST verb paths, a form body, a `{ success, dados }` envelope, a constant tenant id, and `dd/mm/yyyy` dates) configured as a **direct** source — no executor:
-
-```json
-{
-  "name": "legacy",
-  "auth": { "header": "Authorization", "value_template": "Bearer {{secret}}", "secret_ref": "vault:legacy-key" },
-  "request_encoding": "form",
-  "static_body": { "clinica": "35" },
-  "success_path": "success",
-  "message_path": "message",
-  "id_path": "codigo",
-  "list":   { "url": "https://api.legacy.example/listar_agendamentos", "method": "POST", "response_path": "dados", "total_path": "total" },
-  "create": { "url": "https://api.legacy.example/incluir_agendamento",  "method": "POST", "response_path": "dados" },
-  "field_mapping": {
-    "to_external": { "date": { "path": "data", "date_format": "dd/MM/yyyy" }, "patient": "paciente" },
-    "to_rekor":    { "data": { "path": "date", "date_format": "dd/MM/yyyy" }, "paciente": "patient" }
-  }
-}
-```
+URLs must be absolute `https` (or `http` with `allow_insecure_http: true`) and tokens may appear only in the path/query (never the host) — an SSRF guard rejects otherwise.
 
 ### Batch (atomic)
 
@@ -617,46 +541,7 @@ Operation types: `upsert_document`, `delete_document`, `upsert_relationship`, `d
 
 ### Provider Adapters
 
-Import tool definitions from any LLM provider as collections, or export collections as tool definitions.
-
-**Import** (creates collections from tool definitions):
-
-```bash
-# OpenAI
-rekor providers import openai --database <ws> --tools '[{"type":"function","function":{"name":"create_invoice","parameters":{"type":"object","properties":{"customer":{"type":"string"},"amount":{"type":"number"}},"required":["customer"]}}}]'
-
-# Anthropic
-rekor providers import anthropic --database <ws> --tools '[{"name":"create_invoice","input_schema":{"type":"object","properties":{"customer":{"type":"string"}}}}]'
-
-# MCP
-rekor providers import mcp --database <ws> --tools '[{"name":"create_invoice","inputSchema":{"type":"object","properties":{"customer":{"type":"string"}}}}]'
-
-# From file
-rekor providers import openai --database <ws> --tools @tools.json
-```
-
-**Export** (get collections as tool definitions):
-
-```bash
-rekor providers export openai --database <ws>
-rekor providers export anthropic --database <ws> --collections invoices,customers
-rekor providers export mcp --database <ws> --output tools.json
-```
-
-**Import tool call** (create a document from provider-native format):
-
-```bash
-# OpenAI tool call → document
-rekor providers import-call openai invoices --database <ws> \
-  --data '{"arguments":{"customer":"Acme","amount":5000}}' \
-  --external-id call_abc123 --external-source openai
-
-# Anthropic tool call → document
-rekor providers import-call anthropic invoices --database <ws> \
-  --data '{"input":{"customer":"Acme","amount":5000}}'
-```
-
-Supported providers: `openai`, `anthropic`, `google`, `mcp`
+Import tool definitions from any LLM provider as collections (`rekor providers import <provider>`), export collections as tool definitions (`rekor providers export <provider>`), or turn a provider-native tool call into a document (`rekor providers import-call`). Supported providers: `openai`, `anthropic`, `google`, `mcp`. Command forms and payload shapes in **`references/providers.md`**.
 
 ### MCP Factory (custom MCP endpoints)
 
@@ -690,125 +575,18 @@ rekor endpoints delete invoicing-agent --database my-ws
 **Relationship spec format**: `rel_type:op1,op2` (operations: `create`, `list`, `delete`)
 **Batch spec format**: `collection_or_rel:op1,op2`
 
-**Custom tool names and descriptions**: Use `--config` with full JSON for advanced control:
+**Advanced control** comes through `--config` with full JSON (or `--config @endpoint.json`) — custom tool names/descriptions, typed params, curated writes, and guards. The knobs, one line each (full grammar + JSON examples in **`references/mcp-factory.md`**):
 
-```bash
-rekor endpoints upsert invoicing-agent --database my-ws --config '{
-  "name": "Invoicing Agent",
-  "tools": [
-    {
-      "collection": "invoices",
-      "operations": ["get", "list"],
-      "name": "invoice",
-      "names": { "list": "search_invoices" },
-      "description_override": "Search invoices by customer, status, or date range",
-      "filterable_fields": [
-        { "field": "status" },
-        { "field": "issued_at" },
-        { "field": "customer", "match": "text" }
-      ]
-    },
-    {
-      "collection": "payments",
-      "operations": ["create", "get", "list"],
-      "description_override": "Manage payment documents for invoices"
-    }
-  ],
-  "relationships": [
-    {
-      "rel_type": "invoice_payment",
-      "operations": ["create", "list"],
-      "names": { "create": "assign_payment" },
-      "description_override": "Link a payment to an invoice"
-    }
-  ],
-  "sql_query": true
-}'
-```
+- **`name` / `names`** — a tool is named `<op>_<name>` (base defaults to the collection id); override per-operation so a tool reads as the job it does (`{ "list": "search_invoices" }`). Names must be unique across the endpoint.
+- **`filterable_fields`** — expose chosen fields as typed `list` params (native arguments instead of a raw filter). Per field: `param`, `match` (`exact`/`range`/`text`/`any_of`/`member`), `enum`, `pattern`, `description`.
+- **`expose_*: false` + `default_*`** — hide machinery params (`filter`/`sort`/`limit`/`offset`/`fields`) and set server-side defaults; `agent_minimal: true` hides them all at once.
+- **`writable_fields`** — the write-side mirror: an allowlist of exactly the fields a `create`/`update` tool may set (least-privilege intent tools) that also generates a rich typed `data` schema from the collection schema.
+- **`precondition`** — a Filter DSL compare-and-set on a `create`/`update` tool, checked against the document's current state; a miss is a 409 and nothing changes. Invisible to the agent — turns a fragile read-then-write into one race-free call (e.g. `book_slot` only if the slot is still `free`).
+- **`bindings`** — pick which **named write binding** of a proxy source's op a write tool dispatches to (see External Sources), keeping one canonical collection whose writes fan out to several endpoints.
 
-Or from a file: `--config @endpoint.json`
+Connect agents to the endpoint URL with a token scoped to exactly one database. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts. For least-privilege, mint a token bound to the endpoint in one step: `rekor tokens create-for-endpoint <slug> --database <db>` (or pass `--mint-token` to `rekor endpoints upsert`). An endpoint-bound token's authorization IS the endpoint's tool surface — exactly those collections and operations, relationships, batch, and SQL only if you enabled it, nothing else — so a leaked token can't reach beyond the tools you exposed, and you can rotate or revoke one per agent.
 
-**Tool names (`name` / `names`)**: each generated tool is named `<op>_<name>` — `name` is the base noun, defaulting to the collection id (so `invoices` → `get_invoices`, `list_invoices`). Set `name` to choose the base (e.g. `"name": "invoice"` → `get_invoice`). Override an individual tool with `names`, a per-operation map of literal names (`{ "list": "search_invoices" }`), so a tool reads as the job it does. Relationship ops map to `link_`/`list_`/`unlink_` over their base. Tool names must be unique across the endpoint. Only `name` and `names` control naming — there is no `name_override` key, and every key inside `names` must be a valid operation. An unknown or deprecated key on a tool is rejected at config-write, so a stray key can never be silently accepted and then ignored.
-
-**Typed filter params (`filterable_fields`)**: expose chosen fields of a collection as typed parameters on its generated `list` tool, derived from the collection schema — so the agent fills native arguments instead of writing a filter expression. Each field becomes a parameter shaped by its type:
-
-- an `enum` or boolean field → an exact-match param (the agent can only pick a valid value)
-- a number or date/date-time field → a range pair (`<field>_min`/`<field>_max`, or `<field>_after`/`<field>_before`)
-- a string field → a `<field>_contains` substring param
-
-Per field you may set `param` (rename the generated param), `match` (`exact` | `range` | `text` | `any_of` | `member` — `any_of` accepts a list and matches any; `member` exposes an **array** field as a single membership value), an optional `enum` (constrain the param to a fixed set so the agent can only pick a valid value), an optional `pattern` (a regex declaring the valid format of a structured string field — e.g. an id or code shape like `^pat-[0-9]+$` — so a placeholder such as `"null"`/`"undefined"` or any wrong format is rejected with an actionable error instead of silently matching nothing; applies to an exact/any_of/member match on a plain string field, and can't be combined with `enum`), and `description`. An array field auto-exposes as a `member` param; object fields are rejected — expose a nested path (`address.city`) instead. The generic `filter` parameter stays on the tool as the escape hatch for anything the typed params can't express (OR / nesting); typed params and `filter` are combined with AND.
-
-When the typed params cover everything an agent needs, set `"expose_filter": false` on the tool to drop the generic `filter` parameter entirely — keeping the agent-facing tool schema small. Server-side translation of the typed params is unaffected.
-
-The list tool's machinery params (`sort`, `limit`, `offset`, `fields`) can each be hidden the same way — `"expose_sort"`/`"expose_limit"`/`"expose_offset"`/`"expose_fields": false` — and given a server-side default (`"default_sort"`/`"default_limit"`/`"default_fields"`) that still applies when the param is hidden. `"default_fields"` takes the same shape as the `fields` param — a comma-separated string (`"external_id,data.name"`) or an array (`["external_id", "data.name"]`). A hidden `limit` surfaces a `"truncated"` flag in the response if it caps the result, so rows are never silently dropped. `"agent_minimal": true` is a preset that hides all of them (plus `filter`) with a generous default limit, leaving an inputSchema that is pure typed semantics; any explicit `expose_*`/`default_*` on the same tool overrides the preset.
-
-**Curated write surface (`writable_fields`)**: the write-side mirror of `filterable_fields`. On a `create`/`update` tool, list exactly the fields the tool may set — an allowlist that does two things at once:
-
-- **Least-privilege / intent-scoped tools.** A field the agent sends that isn't on the list is rejected with an actionable error. So a front-desk tool can be barred from ever setting a price or internal field, and you can split one operation into intent tools — a `confirm` tool allowed to set only `status` and a `reschedule` tool allowed to set only the time — instead of relying on prose to fence them.
-- **A rich, typed write schema.** The tool's `data` parameter is generated from the collection schema for just those fields — their types, enums, formats, `required`, and descriptions — instead of a generic "any object" slot. The agent gets the same typed, described, validated guidance on writes that `filterable_fields` gives on reads.
-
-```json
-{
-  "collection": "appointments",
-  "operations": ["update"],
-  "names": { "update": "reschedule_appointment" },
-  "writable_fields": [
-    { "field": "start_time", "param": "when", "description": "New start time (ISO 8601)" }
-  ]
-}
-```
-
-Per field you may set `param` (rename the key the agent sets in `data` — the tool maps it back to the real field) and `description` (override the field's description). Fields are **top-level only** (writes merge at the top level — a partial update changes just the fields you send and leaves the rest untouched; nested objects are replaced whole). The collection schema stays the validation source of truth — `writable_fields` shapes *which* fields the tool exposes and *how they're described*, it doesn't re-validate values. Omit `writable_fields` to keep the generic any-field `data` slot. A tool with `writable_fields` but no `create`/`update` operation is rejected at config-write.
-
-**Conditional writes (`precondition`)**: give a `create`/`update` tool a `precondition` — a Filter DSL expression checked against the document's **current** state before the write applies. If it doesn't hold, the write is rejected with a 409 conflict and nothing changes; if it holds, the write proceeds. This turns a fragile read-then-write into one correct, race-free call: model a bookable slot as a document and make "book it" a guarded update, so two agents can't both book the same slot.
-
-```json
-{
-  "collection": "slots",
-  "operations": ["update"],
-  "names": { "update": "book_slot" },
-  "precondition": { "field": "data.status", "op": "eq", "value": "free" }
-}
-```
-
-The guard is **invisible to the agent** — it's part of the endpoint config, never a tool parameter — so the agent just calls `book_slot(...)` and the booking integrity is enforced for it. Paths address the current document as `data.<field>`, `version`, or `id` (e.g. `{ "field": "version", "op": "is_null" }` = create-only-if-absent). One precondition per tool; the `search` operator isn't allowed. Idempotent writes (retries that shouldn't double-create) are already handled by upsert-by-`external_id` — the precondition is for cross-state guards, not retry safety.
-
-**Guarded + unguarded writes on one collection**: a `precondition` is one-per-tool, so to expose both a guarded write and a plain write on the same collection, declare two tool entries for that collection with the same operation but distinct `names`. Tool names only need to be unique across the endpoint — a duplicate (collection, operation) pair is fine:
-
-```json
-"tools": [
-  {
-    "collection": "slots",
-    "operations": ["update"],
-    "names": { "update": "book_slot" },
-    "precondition": { "field": "data.status", "op": "eq", "value": "free" }
-  },
-  {
-    "collection": "slots",
-    "operations": ["update"],
-    "names": { "update": "manage_slot" }
-  }
-]
-```
-
-`book_slot` succeeds only on a slot that's still `free`; `manage_slot` updates the same slot unconditionally (e.g. an operator correction). Without the distinct `names`, both would default to `update_slots` and collide.
-
-**Selecting a named write binding (`bindings`)**: when a proxy-backed collection's source declares **named write bindings** (a `create`/`update`/`delete` op given as a map of named endpoint variants — see External Sources), a write tool picks which one it dispatches to with a `bindings` map: `{ "collection": "bookings", "operations": ["create"], "names": { "create": "book_trial" }, "bindings": { "create": "trial" } }`. This is what keeps one canonical collection (`bookings`) serving a backend whose writes fan out to several endpoints: declare two `create` tools with distinct `names` (`book_trial`, `book_makeup`) selecting different bindings (`trial`, `makeup`) of the same source. The agent never sees a `binding` parameter — it's injected server-side, exactly like `precondition`. Required when the bound op is a binding map with no `default`; rejected when the op is a single endpoint or names a binding the source doesn't declare (validated at config-write and re-checked at promotion).
-
-The generated `list` tools are lenient about how structured arguments arrive: `filter` is always a JSON-encoded Filter DSL string, while `sort` and any multi-value (`any_of`) parameter accept **either** the native array **or** a JSON-encoded string of it — so an agent that serializes array arguments as strings still works. (`sort` is the same JSON array of `{"field","direction"}` terms described above.)
-
-Connect agents to the endpoint URL with a token scoped to exactly one database. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts.
-
-For least-privilege, mint a token bound to the endpoint in one step: `rekor tokens create-for-endpoint <slug> --database <db>` (or pass `--mint-token` to `rekor endpoints upsert`). An endpoint-bound token's authorization IS the endpoint's tool surface — exactly those collections and operations, relationships, batch, and SQL only if you enabled it, nothing else — so a leaked token can't reach beyond the tools you exposed, and you can rotate or revoke one per agent.
-
-Endpoints can only be created/modified in preview databases. Promote to production when ready. Promotion is blocked if it would break a published endpoint — removing a collection or relationship type the endpoint exposes, a field its typed filters, `writable_fields`, or a `precondition` depend on, or a named write binding a tool's `bindings` selects — so promote the endpoint together with the schema change (a dry run lists any such conflicts first).
-
-**Which database serves the endpoint:** `mcp.rekor.pro/e/{slug}/mcp` resolves the endpoint from the database your **token** is scoped to. So:
-
-- **Production:** promote the endpoint, then connect with a token scoped to the production database (`my-ws`).
-- **Preview (sandbox testing):** connect with a token scoped to the **preview database id** (`my-ws--<preview-slug>`) to serve the not-yet-promoted endpoint.
-
-If the slug can't be resolved for your token's database (unknown endpoint, or one that only exists in a preview you aren't scoped to), `initialize` returns a clear JSON-RPC error telling you to scope to the preview database id or promote — it won't silently hand back a session with zero tools.
+Endpoints can only be created/modified in preview databases. Promote to production when ready; promotion is blocked if it would break a published endpoint (a removed collection/rel-type, or a field its typed filters/`writable_fields`/`precondition`/`bindings` depend on) — a dry run lists conflicts first. `mcp.rekor.pro/e/{slug}/mcp` resolves the endpoint from the database your **token** is scoped to, so connect with a production token for the promoted endpoint or a preview-database token to sandbox-test the not-yet-promoted one (`references/mcp-factory.md` covers the resolution rules).
 
 ### API Tokens
 
