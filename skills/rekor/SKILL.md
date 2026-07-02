@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.34.0
+version: 1.35.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -548,11 +548,17 @@ Import tool definitions from any LLM provider as collections (`rekor providers i
 Create purpose-built MCP servers from your database collections. Each toolset serves domain-specific tools — agents see `create_invoice`, `list_payments`, not generic Rekor operations.
 
 ```bash
-# Create a curated toolset
+# 1. Author first-class Tools — one collection + one operation each; the id is the tool name
+rekor tools upsert get_invoice    --database my-ws --collection invoices --operation get
+rekor tools upsert list_invoices  --database my-ws --collection invoices --operation list
+rekor tools upsert create_payment --database my-ws --collection payments --operation create
+rekor tools upsert list_payments  --database my-ws --collection payments --operation list
+
+# 2. Compose a curated toolset that references those Tools by id
 rekor toolsets upsert invoicing-agent --database my-ws \
   --name "Invoicing Agent" \
-  --tool "invoices:get,list" \
-  --tool "payments:create,get,list" \
+  --tool get_invoice --tool list_invoices \
+  --tool create_payment --tool list_payments \
   --relationship "invoice_payment:list" \
   --batch "invoices:create,update" --batch "payments:create" --batch "invoice_payment:create" \
   --sql-query
@@ -571,18 +577,18 @@ rekor toolsets get invoicing-agent --database my-ws --resolved
 rekor toolsets delete invoicing-agent --database my-ws
 ```
 
-**Tool spec format**: `collection:op1,op2` (operations: `create`, `get`, `list`, `update`, `delete`)
+**Tool reference format**: `--tool <tool_id>` (or `<tool_id>=<surface_name>` to rename it in this toolset). Author the Tool first with `rekor tools upsert <id> --collection X --operation Y` — one collection + one operation, its `id` is the agent-facing tool name.
 **Relationship spec format**: `rel_type:op1,op2` (operations: `create`, `list`, `delete`)
 **Batch spec format**: `collection_or_rel:op1,op2`
 
-**Advanced control** comes through `--config` with full JSON (or `--config @toolset.json`) — custom tool names/descriptions, typed params, curated writes, and guards. The knobs, one line each (full grammar + JSON examples in **`references/mcp-factory.md`**):
+**Advanced control** lives on the first-class **Tools** a toolset references. Author a Tool with the shaping config — `rekor tools upsert <id> --collection X --operation Y --config '{…}'` (one collection + one op) — then reference it from the toolset (`--tool <id>`, or a `tools: [{ tool, tool_name?, description_override? }]` entry in the toolset `--config`). The per-Tool knobs, one line each (full grammar + JSON examples in **`references/mcp-factory.md`**):
 
-- **`name` / `names`** — a tool is named `<op>_<name>` (base defaults to the collection id); override per-operation so a tool reads as the job it does (`{ "list": "search_invoices" }`). Names must be unique across the toolset.
-- **`filterable_fields`** — expose chosen fields as typed `list` params (native arguments instead of a raw filter). Per field: `param`, `match` (`exact`/`range`/`text`/`any_of`/`member`), `enum`, `pattern`, `description`.
-- **`expose_*: false` + `default_*`** — hide machinery params (`filter`/`sort`/`limit`/`offset`/`fields`) and set server-side defaults; `agent_minimal: true` hides them all at once.
-- **`writable_fields`** — the write-side mirror: an allowlist of exactly the fields a `create`/`update` tool may set (least-privilege intent tools) that also generates a rich typed `data` schema from the collection schema.
-- **`precondition`** — a Filter DSL compare-and-set on a `create`/`update` tool, checked against the document's current state; a miss is a 409 and nothing changes. Invisible to the agent — turns a fragile read-then-write into one race-free call (e.g. `book_slot` only if the slot is still `free`).
-- **`bindings`** — pick which **named write binding** of a proxy source's op a write tool dispatches to (see External Sources), keeping one canonical collection whose writes fan out to several endpoints.
+- **tool name** — the Tool `id` is the agent-facing tool name; a toolset reference can rename it per-surface with `tool_name` or replace its description with `description_override`. Names must be unique across the toolset. (Relationship tools, declared inline on the toolset, keep the `name`/`names` map.)
+- **`filterable_fields`** — expose chosen fields of a `list` Tool as typed params (native arguments instead of a raw filter). Per field: `param`, `match` (`exact`/`range`/`text`/`any_of`/`member`), `enum`, `pattern`, `description`.
+- **`expose_*: false` + `default_*`** — hide a `list` Tool's machinery params (`filter`/`sort`/`limit`/`offset`/`fields`) and set server-side defaults; `agent_minimal: true` hides them all at once.
+- **`writable_fields`** — the write-side mirror on a `create`/`update` Tool: an allowlist of exactly the fields it may set (least-privilege intent tools) that also generates a rich typed `data` schema from the collection schema.
+- **`precondition`** — a Filter DSL compare-and-set on a `create`/`update` Tool, checked against the document's current state; a miss is a 409 and nothing changes. Invisible to the agent — turns a fragile read-then-write into one race-free call (e.g. `book_slot` only if the slot is still `free`).
+- **`binding`** — pick which **named write binding** of a proxy source's op a write Tool dispatches to (see External Sources), keeping one canonical collection whose writes fan out to several endpoints.
 
 Connect agents to the toolset URL with a token scoped to exactly one database. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts. For least-privilege, mint a token bound to the toolset in one step: `rekor tokens create-for-toolset <slug> --database <db>` (or pass `--mint-token` to `rekor toolsets upsert`). A toolset-bound token's authorization IS the toolset's tool surface — exactly those collections and operations, relationships, batch, and SQL only if you enabled it, nothing else — so a leaked token can't reach beyond the tools you exposed, and you can rotate or revoke one per agent.
 
