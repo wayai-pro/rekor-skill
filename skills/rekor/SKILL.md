@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.33.0
+version: 1.34.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a database, defining the first
@@ -8,8 +8,8 @@ description: |
   managing relationships, uploading file attachments, configuring inbound webhooks/triggers/batch
   operations, backing a collection with an external API (external sources), storing
   credentials in the secret vault, importing or exporting tool definitions across
-  providers (OpenAI/Anthropic/Google/MCP), creating curated MCP Factory endpoints,
-  scoping API tokens, modeling collections and MCP endpoints so LLM agents use them
+  providers (OpenAI/Anthropic/Google/MCP), creating curated MCP Factory toolsets,
+  scoping API tokens, modeling collections and MCP toolsets so LLM agents use them
   reliably, or interpreting Rekor concepts (database, collection, document,
   relationship, preview/production, external_id).
 ---
@@ -22,8 +22,8 @@ You have access to the `rekor` CLI — the builder interface for Rekor. Use it t
 
 - Drive Rekor through the **`rekor` CLI** when you have shell access. If you also have `mcp__rekor__*` tools in your toolset, prefer the CLI for setup and configuration; reserve MCP tools for production read/write operations.
 - Only provide information from this skill, tool descriptions, or reference documentation. Do not invent URLs, paths, commands, or flags.
-- Schema work (collections, inbound webhooks, triggers, MCP Factory endpoints) only happens in **preview** databases. Always create or use a preview before changing schemas.
-- **Identifiers are permanent.** The `id` of a database, collection, relationship type, and MCP Factory endpoint *is* its identity and is **immutable** — chosen once at creation and never renamed. Display names and descriptions stay editable, but never the `id` (a relationship type has no separate name — its `id` is also its label). There is no rename: to "rename" one of these you create a new entity and migrate its data (the old one is left untouched). So choose clear, stable, lowercase-slug ids up front (e.g. `patients`, `treated_by`).
+- Schema work (collections, inbound webhooks, triggers, MCP Factory toolsets) only happens in **preview** databases. Always create or use a preview before changing schemas.
+- **Identifiers are permanent.** The `id` of a database, collection, relationship type, Tool, and MCP Factory toolset *is* its identity and is **immutable** — chosen once at creation and never renamed. Display names and descriptions stay editable, but never the `id` (a relationship type has no separate name — its `id` is also its label). There is no rename: to "rename" one of these you create a new entity and migrate its data (the old one is left untouched). So choose clear, stable, lowercase-slug ids up front (e.g. `patients`, `treated_by`).
 - **Promotion is human-only.** When schema is ready, surface the exact `rekor databases promote` command and wait for the user to run it.
 - Tokens are shown only **once on creation**. Always tell the user to copy and store it before doing anything else.
 - Never auto-commit. Show the user `git diff` (when working with schema files) and wait for approval.
@@ -78,7 +78,7 @@ Set `REKOR_DATABASE=<id>` in the user's shell to avoid passing `--database` on e
 
 ### 4. Create a preview environment
 
-Schema changes (collections, inbound webhooks, triggers, MCP Factory endpoints) are blocked in production databases. Create a preview to do schema work:
+Schema changes (collections, inbound webhooks, triggers, MCP Factory toolsets) are blocked in production databases. Create a preview to do schema work:
 
 ```bash
 rekor databases create-preview <id> --name "<preview-slug>"
@@ -128,9 +128,9 @@ rekor tokens create --name "<agent-name>" \
 
 The raw token (`rec_...`) is shown **once**. Copy it immediately.
 
-**MCP Factory endpoint** — for purpose-built MCP tools per agent (recommended for LLM agents):
+**MCP Factory toolset** — for purpose-built MCP tools per agent (recommended for LLM agents):
 
-See the [MCP Factory](#mcp-factory-custom-mcp-endpoints) section below.
+See the [MCP Factory](#mcp-factory-custom-toolsets) section below.
 
 ---
 
@@ -228,7 +228,7 @@ Tags let you group databases (e.g., `client:acme,billing`). Filter with `--tag`.
 
 ### Config as Code (pull / push)
 
-Manage a database's whole config — collections, relationship types, inbound webhooks, triggers, MCP endpoints — as version-controlled YAML files instead of one-off commands. Files live under `rekor-ws/databases/<db>/`, one file per entity, so changes review cleanly in a pull request.
+Manage a database's whole config — collections, relationship types, inbound webhooks, triggers, MCP toolsets — as version-controlled YAML files instead of one-off commands. Files live under `rekor-ws/databases/<db>/`, one file per entity, so changes review cleanly in a pull request.
 
 ```bash
 rekor pull <preview>                 # write the preview's config + a read-only mirror of linked production
@@ -247,7 +247,7 @@ rekor unbind                         # clear this worktree's database binding
 
 ### Templates
 
-Ready-made data layers you can pull and stand up in minutes — each bundles a database's collections, relationship types, and a custom MCP endpoint for an AI agent.
+Ready-made data layers you can pull and stand up in minutes — each bundles a database's collections, relationship types, and a custom toolset for an AI agent.
 
 ```bash
 rekor template list                                       # browse available templates
@@ -255,7 +255,7 @@ rekor template pull <slug> [--lang en|pt|es] [--dry-run]  # write a template's d
 rekor template pull <slug> --force                        # overwrite existing files in the target folder
 ```
 
-- **`pull` seeds a config-as-code folder.** It writes the template's collections, relationship types, and MCP endpoint into `rekor-ws/databases/<slug>/` (id defaults to the slug; override with `--database <id>`), pre-wired with an `origin_database_id` so the normal flow stands it up: `rekor databases create <id> --name "…"`, then `rekor push <id>`, then `rekor databases promote <id> --from <preview>`. Once promoted, the template's MCP endpoint is live for your agents.
+- **`pull` seeds a config-as-code folder.** It writes the template's collections, relationship types, and MCP toolset into `rekor-ws/databases/<slug>/` (id defaults to the slug; override with `--database <id>`), pre-wired with an `origin_database_id` so the normal flow stands it up: `rekor databases create <id> --name "…"`, then `rekor push <id>`, then `rekor databases promote <id> --from <preview>`. Once promoted, the template's MCP toolset is live for your agents.
 - **`pull` won't overwrite your edits.** If the target folder already has files the template would write, `pull` refuses and lists them (your other files are left untouched) — pass `--force` to overwrite, `--database <new-id>` to write elsewhere, or `--dry-run` to preview the file set first.
 - **`--lang`** selects a localized variant; an untranslated language falls back to the default (with a note).
 
@@ -393,9 +393,9 @@ The integration edges below — inbound webhooks, triggers, and external sources
 **The one rule: model the entity canonically first — agnostic to any integration — then decide, per operation, how it's backed.** The collection IS the entity: a clean schema with business-named properties, sensible enums and defaults — never the upstream payload's shape. Integration lives at declarative edges, never smeared into the schema or tool surface. A consumer (an agent, a query) should not be able to tell whether a field is rekor-native or mirrored from a legacy system.
 
 - **Model the canonical first.** Derive the schema and tool surface from the domain and the agents' real journeys, not from any backend's payload. Put each business rule at the most reliable layer it fits — schema (enums, `required`, defaults) > trigger (reactive invariant) > tool constraint (`writable_fields`/`precondition`) > prompt — and never encode an enforceable data invariant as a prompt rule. Right-grain it: model only what the journeys touch and extend additively (speculative schema is harder to remove than to add).
-- **Swap-test.** If re-backing an entity (legacy → native → a different system) would force a schema or tool-surface change, the model leaked the integration — fix the model. Only an integration-agnostic model is swappable: the same canonical contract can be served natively in one database and proxied to a legacy API in another by swapping only the source's `field_mapping`. Backfill catalog gaps the legacy system lacks with native collections in the same database, exposed through the same endpoint.
+- **Swap-test.** If re-backing an entity (legacy → native → a different system) would force a schema or tool-surface change, the model leaked the integration — fix the model. Only an integration-agnostic model is swappable: the same canonical contract can be served natively in one database and proxied to a legacy API in another by swapping only the source's `field_mapping`. Backfill catalog gaps the legacy system lacks with native collections in the same database, exposed through the same toolset.
 - **Offline evals are a free payoff — the swap-test from the other side.** The preview-only `--integrations disabled` eval toggle (see **Databases** above) works *precisely because* the model is integration-agnostic: where the swap-test *re-backs* an entity without touching its surface, the eval toggle *un-backs* it without touching its surface — disable the source and the same canonical schema, tools, and field mappings keep serving, now from seeded local data. So model canonical-first and you get deterministic, prod-safe agent evals for free: it's one principle, not a separate feature.
-- **Native vs proxy is a per-COLLECTION choice; a source's operation blocks declare which operations the upstream exposes.** A collection with no sources is native (all CRUD local); a collection with a source is proxy-backed — every write goes upstream and reads resolve against the upstream (it stores nothing locally). The source's `list`/`get`/`create`/`update`/`delete` blocks pick *which* operations the upstream supports (read-only `get`/`list`, or full read-write); an operation the source omits is **unsupported**, not silently native. You don't split native and proxy across the operations of one collection — you mix them across collections: **one MCP endpoint freely composes native-backed and proxy-backed tools** (a proxied `invoices` beside native `plans`/`activities` you backfilled).
+- **Native vs proxy is a per-COLLECTION choice; a source's operation blocks declare which operations the upstream exposes.** A collection with no sources is native (all CRUD local); a collection with a source is proxy-backed — every write goes upstream and reads resolve against the upstream (it stores nothing locally). The source's `list`/`get`/`create`/`update`/`delete` blocks pick *which* operations the upstream supports (read-only `get`/`list`, or full read-write); an operation the source omits is **unsupported**, not silently native. You don't split native and proxy across the operations of one collection — you mix them across collections: **one toolset freely composes native-backed and proxy-backed tools** (a proxied `invoices` beside native `plans`/`activities` you backfilled).
 - **Don't route native-vs-proxy per tool or per field.** Native-vs-proxy is a per-collection choice, never per-tool; `writable_fields` restricts *which* fields a tool writes, never *where*. (Two proxy tools on the same op MAY select different **named write bindings** of the source — see External Sources — but that only picks which upstream *endpoint* a write hits; it stays all-proxy and never makes one tool native and another proxy.) A "native read + proxy write on one collection" mix is a read-consistency hole (the native read won't reflect the proxy write until something syncs it) — and once you add that sync, native-write + an `external_write` trigger is strictly better. The two coherent shapes are **all-proxy** or **all-native + sync**; the per-tool mix is the incoherent middle.
 - **Prefer the native mirror; reach for proxy only when forced.** A native collection kept in sync gives local query/join/filter, speed, transactional writes, audit, and availability decoupled from the upstream. Choose proxy-on-read only when staleness is unacceptable, a write must be synchronously confirmed by the upstream system of record, or the dataset is too large/cold to mirror.
 - **Hybrid entities (mirrored fields + a rekor-owned overlay) live in ONE collection.** A field the upstream lacks (a workflow `status`, a tag, a score) belongs on the same document as the mirrored fields — integrated query/filter demands it (you can't `list where status=X` if `status` lives in another collection). Splitting an entity to separate ownership trades a real query capability for bookkeeping; don't. Exception: an overlay that is itself a richer entity with its own lifecycle/history → a related collection + relationship. A scalar attribute is never a reason to split.
@@ -543,13 +543,13 @@ Operation types: `upsert_document`, `delete_document`, `upsert_relationship`, `d
 
 Import tool definitions from any LLM provider as collections (`rekor providers import <provider>`), export collections as tool definitions (`rekor providers export <provider>`), or turn a provider-native tool call into a document (`rekor providers import-call`). Supported providers: `openai`, `anthropic`, `google`, `mcp`. Command forms and payload shapes in **`references/providers.md`**.
 
-### MCP Factory (custom MCP endpoints)
+### MCP Factory (custom toolsets)
 
-Create purpose-built MCP servers from your database collections. Each endpoint serves domain-specific tools — agents see `create_invoice`, `list_payments`, not generic Rekor operations.
+Create purpose-built MCP servers from your database collections. Each toolset serves domain-specific tools — agents see `create_invoice`, `list_payments`, not generic Rekor operations.
 
 ```bash
-# Create a curated MCP endpoint
-rekor endpoints upsert invoicing-agent --database my-ws \
+# Create a curated toolset
+rekor toolsets upsert invoicing-agent --database my-ws \
   --name "Invoicing Agent" \
   --tool "invoices:get,list" \
   --tool "payments:create,get,list" \
@@ -558,35 +558,35 @@ rekor endpoints upsert invoicing-agent --database my-ws \
   --sql-query
 
 # Get the MCP connection URL (Streamable HTTP)
-rekor endpoints url invoicing-agent
-# → https://mcp.rekor.pro/e/invoicing-agent/mcp
+rekor toolsets url invoicing-agent
+# → https://mcp.rekor.pro/t/invoicing-agent/mcp
 
-# List all endpoints
-rekor endpoints list --database my-ws
+# List all toolsets
+rekor toolsets list --database my-ws
 
-# Get endpoint config (with resolved schemas)
-rekor endpoints get invoicing-agent --database my-ws --resolved
+# Get toolset config (with resolved schemas)
+rekor toolsets get invoicing-agent --database my-ws --resolved
 
-# Delete an endpoint
-rekor endpoints delete invoicing-agent --database my-ws
+# Delete a toolset
+rekor toolsets delete invoicing-agent --database my-ws
 ```
 
 **Tool spec format**: `collection:op1,op2` (operations: `create`, `get`, `list`, `update`, `delete`)
 **Relationship spec format**: `rel_type:op1,op2` (operations: `create`, `list`, `delete`)
 **Batch spec format**: `collection_or_rel:op1,op2`
 
-**Advanced control** comes through `--config` with full JSON (or `--config @endpoint.json`) — custom tool names/descriptions, typed params, curated writes, and guards. The knobs, one line each (full grammar + JSON examples in **`references/mcp-factory.md`**):
+**Advanced control** comes through `--config` with full JSON (or `--config @toolset.json`) — custom tool names/descriptions, typed params, curated writes, and guards. The knobs, one line each (full grammar + JSON examples in **`references/mcp-factory.md`**):
 
-- **`name` / `names`** — a tool is named `<op>_<name>` (base defaults to the collection id); override per-operation so a tool reads as the job it does (`{ "list": "search_invoices" }`). Names must be unique across the endpoint.
+- **`name` / `names`** — a tool is named `<op>_<name>` (base defaults to the collection id); override per-operation so a tool reads as the job it does (`{ "list": "search_invoices" }`). Names must be unique across the toolset.
 - **`filterable_fields`** — expose chosen fields as typed `list` params (native arguments instead of a raw filter). Per field: `param`, `match` (`exact`/`range`/`text`/`any_of`/`member`), `enum`, `pattern`, `description`.
 - **`expose_*: false` + `default_*`** — hide machinery params (`filter`/`sort`/`limit`/`offset`/`fields`) and set server-side defaults; `agent_minimal: true` hides them all at once.
 - **`writable_fields`** — the write-side mirror: an allowlist of exactly the fields a `create`/`update` tool may set (least-privilege intent tools) that also generates a rich typed `data` schema from the collection schema.
 - **`precondition`** — a Filter DSL compare-and-set on a `create`/`update` tool, checked against the document's current state; a miss is a 409 and nothing changes. Invisible to the agent — turns a fragile read-then-write into one race-free call (e.g. `book_slot` only if the slot is still `free`).
 - **`bindings`** — pick which **named write binding** of a proxy source's op a write tool dispatches to (see External Sources), keeping one canonical collection whose writes fan out to several endpoints.
 
-Connect agents to the endpoint URL with a token scoped to exactly one database. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts. For least-privilege, mint a token bound to the endpoint in one step: `rekor tokens create-for-endpoint <slug> --database <db>` (or pass `--mint-token` to `rekor endpoints upsert`). An endpoint-bound token's authorization IS the endpoint's tool surface — exactly those collections and operations, relationships, batch, and SQL only if you enabled it, nothing else — so a leaked token can't reach beyond the tools you exposed, and you can rotate or revoke one per agent.
+Connect agents to the toolset URL with a token scoped to exactly one database. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts. For least-privilege, mint a token bound to the toolset in one step: `rekor tokens create-for-toolset <slug> --database <db>` (or pass `--mint-token` to `rekor toolsets upsert`). A toolset-bound token's authorization IS the toolset's tool surface — exactly those collections and operations, relationships, batch, and SQL only if you enabled it, nothing else — so a leaked token can't reach beyond the tools you exposed, and you can rotate or revoke one per agent.
 
-Endpoints can only be created/modified in preview databases. Promote to production when ready; promotion is blocked if it would break a published endpoint (a removed collection/rel-type, or a field its typed filters/`writable_fields`/`precondition`/`bindings` depend on) — a dry run lists conflicts first. `mcp.rekor.pro/e/{slug}/mcp` resolves the endpoint from the database your **token** is scoped to, so connect with a production token for the promoted endpoint or a preview-database token to sandbox-test the not-yet-promoted one (`references/mcp-factory.md` covers the resolution rules).
+Toolsets can only be created/modified in preview databases. Promote to production when ready; promotion is blocked if it would break a published toolset (a removed collection/rel-type, or a field its typed filters/`writable_fields`/`precondition`/`bindings` depend on) — a dry run lists conflicts first. `mcp.rekor.pro/t/{slug}/mcp` resolves the toolset from the database your **token** is scoped to, so connect with a production token for the promoted toolset or a preview-database token to sandbox-test the not-yet-promoted one (`references/mcp-factory.md` covers the resolution rules).
 
 ### API Tokens
 
@@ -612,7 +612,7 @@ rekor tokens list
 rekor tokens revoke <token_id>
 ```
 
-**Permissions**: `read:documents`, `write:documents`, `read:collections`, `write:collections`, `read:relationships`, `write:relationships`, `read:attachments`, `write:attachments`, `read:inbound_webhooks`, `write:inbound_webhooks`, `read:triggers`, `write:triggers`, `read:endpoints`, `write:endpoints`, `read:databases`, `write:databases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), or `*` for all.
+**Permissions**: `read:documents`, `write:documents`, `read:collections`, `write:collections`, `read:relationships`, `write:relationships`, `read:attachments`, `write:attachments`, `read:inbound_webhooks`, `write:inbound_webhooks`, `read:triggers`, `write:triggers`, `read:toolsets`, `write:toolsets`, `read:databases`, `write:databases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), or `*` for all.
 
 **Scope fields**: `databases` (required), `collections` (optional — omit for all), `environments` (optional — `production`, `preview`, or omit for both).
 
@@ -721,17 +721,17 @@ The command reference above is the *mechanics*. This is how to **combine** them 
 
 1. **One intent = one atomic write.** An action that takes N separate writes is N chances to drop one and leave the system half-updated. Collapse a single user intent into a single write; when one intent genuinely spans multiple documents, use `rekor batch` so they all commit or all roll back.
 2. **State lives on the entity — don't duplicate it.** Keep each piece of state in exactly one place, on the entity it describes. Mirroring a status onto a second document forces the agent to update both in sync, recreating the multi-write problem. Link or query the source of truth instead of copying its fields.
-3. **Expose the job, nothing more.** An agent-facing tool should express the task and nothing else. Push machinery — sort, limit, offset, field selection, the raw filter DSL — into endpoint config with `expose_*: false` plus server-side `default_*` (or the `agent_minimal` preset). The agent fills meaning via typed `filterable_fields` on reads and `writable_fields` on writes (the tool sees only the fields its job sets), not plumbing.
+3. **Expose the job, nothing more.** An agent-facing tool should express the task and nothing else. Push machinery — sort, limit, offset, field selection, the raw filter DSL — into toolset config with `expose_*: false` plus server-side `default_*` (or the `agent_minimal` preset). The agent fills meaning via typed `filterable_fields` on reads and `writable_fields` on writes (the tool sees only the fields its job sets), not plumbing.
 4. **Guards belong in config, not arguments.** Enforce invariants server-side where the agent can't forget them, not as instructions it must follow. A `precondition` makes a state-dependent write race-free and invisible to the agent; schema `required` + enums reject malformed input. The rejection message is the recovery channel — keep it legible and actionable so the agent self-corrects.
 5. **Narrow the input space.** Every degree of freedom is a way to get it wrong. Constrain with enums (a closed set to pick from), typed `filterable_fields` (native params instead of free-form filter strings), stable `external_id` keys (idempotent upsert, no invented ids), and `x-fk` on writes (a reference must resolve to a real document).
 6. **Model for the fallible agent, not the ideal one.** Agents skip steps, send empty strings for fields they didn't fill, and invent ids. `required` rejects the missing field, enums reject the made-up value, `x-fk` rejects the invented reference, `precondition` rejects the out-of-order write — each turns a silent corruption into a clear, correctable error.
-7. **Separate the operator surface from the agent surface.** Keep the surface that *authors config* apart from the one that *invokes it*. Broad human/CI tokens design schemas and endpoints; endpoint-bound tokens (`rekor tokens create-for-endpoint`) only call the curated tools and can't reach past them. Name tools by action and cardinality (`book_slot`, `list_invoices`, `assign_payment`) so the name itself tells the agent what the tool does.
+7. **Separate the operator surface from the agent surface.** Keep the surface that *authors config* apart from the one that *invokes it*. Broad human/CI tokens design schemas and toolsets; toolset-bound tokens (`rekor tokens create-for-toolset`) only call the curated tools and can't reach past them. Name tools by action and cardinality (`book_slot`, `list_invoices`, `assign_payment`) so the name itself tells the agent what the tool does.
 
 **Also:** keep data **canonical and self-describing** — declare datetime fields `format: date-time` and set the collection's `x-timezone` so every value carries its offset, and prefer readable enums over opaque codes, so a document can be reasoned about without outside context. And **optimize the common path deliberately** — make the single most frequent action one well-named tool call, accepting more friction on the rare one.
 
 ### Recipes: principle → the feature that realizes it
 
-The principles above are agent-layer and backend-neutral; these are the specific endpoint knobs that implement them — the lookup from intent to implementation. Each knob is detailed in the endpoint section above.
+The principles above are agent-layer and backend-neutral; these are the specific toolset knobs that implement them — the lookup from intent to implementation. Each knob is detailed in the toolset section above.
 
 - **One tool = one intent; curate the surface** — distinct `names` per operation (`names: { "list": "search_invoices" }`), even two tools on one collection; a curated `filterable_fields` list.
 - **Hide machinery (filter / sort / limit / offset / fields)** — `expose_*: false` per param (plus a server-side `default_*`), or the `agent_minimal` preset that hides them all at once.

@@ -1,6 +1,6 @@
-# MCP Factory — full endpoint config reference
+# MCP Factory — full toolset config reference
 
-Deep grammar for MCP Factory endpoints. The SKILL.md **MCP Factory** section covers the concept, the basic CLI, the spec formats, and the named menu of advanced knobs; read this file when you actually configure a curated endpoint.
+Deep grammar for MCP Factory toolsets. The SKILL.md **MCP Factory** section covers the concept, the basic CLI, the spec formats, and the named menu of advanced knobs; read this file when you actually configure a curated toolset.
 
 ## Contents
 
@@ -13,14 +13,14 @@ Deep grammar for MCP Factory endpoints. The SKILL.md **MCP Factory** section cov
 - [Guarded + unguarded writes on one collection](#guarded--unguarded-writes-on-one-collection)
 - [Selecting a named write binding (`bindings`)](#selecting-a-named-write-binding-bindings)
 - [Lenient list-tool arguments](#lenient-list-tool-arguments)
-- [Which database serves the endpoint](#which-database-serves-the-endpoint)
+- [Which database serves the toolset](#which-database-serves-the-toolset)
 
 ## Full `--config` JSON
 
-Use `--config` with full JSON (or `--config @endpoint.json`) for advanced control over tool names, descriptions, filters, and writes:
+Use `--config` with full JSON (or `--config @toolset.json`) for advanced control over tool names, descriptions, filters, and writes:
 
 ```bash
-rekor endpoints upsert invoicing-agent --database my-ws --config '{
+rekor toolsets upsert invoicing-agent --database my-ws --config '{
   "name": "Invoicing Agent",
   "tools": [
     {
@@ -55,7 +55,7 @@ rekor endpoints upsert invoicing-agent --database my-ws --config '{
 
 ## Tool names (`name` / `names`)
 
-Each generated tool is named `<op>_<name>` — `name` is the base noun, defaulting to the collection id (so `invoices` → `get_invoices`, `list_invoices`). Set `name` to choose the base (e.g. `"name": "invoice"` → `get_invoice`). Override an individual tool with `names`, a per-operation map of literal names (`{ "list": "search_invoices" }`), so a tool reads as the job it does. Relationship ops map to `link_`/`list_`/`unlink_` over their base. Tool names must be unique across the endpoint. Only `name` and `names` control naming — there is no `name_override` key, and every key inside `names` must be a valid operation. An unknown or deprecated key on a tool is rejected at config-write, so a stray key can never be silently accepted and then ignored.
+Each generated tool is named `<op>_<name>` — `name` is the base noun, defaulting to the collection id (so `invoices` → `get_invoices`, `list_invoices`). Set `name` to choose the base (e.g. `"name": "invoice"` → `get_invoice`). Override an individual tool with `names`, a per-operation map of literal names (`{ "list": "search_invoices" }`), so a tool reads as the job it does. Relationship ops map to `link_`/`list_`/`unlink_` over their base. Tool names must be unique across the toolset. Only `name` and `names` control naming — there is no `name_override` key, and every key inside `names` must be a valid operation. An unknown or deprecated key on a tool is rejected at config-write, so a stray key can never be silently accepted and then ignored.
 
 ## Typed filter params (`filterable_fields`)
 
@@ -106,11 +106,11 @@ Give a `create`/`update` tool a `precondition` — a Filter DSL expression check
 }
 ```
 
-The guard is **invisible to the agent** — it's part of the endpoint config, never a tool parameter — so the agent just calls `book_slot(...)` and the booking integrity is enforced for it. Paths address the current document as `data.<field>`, `version`, or `id` (e.g. `{ "field": "version", "op": "is_null" }` = create-only-if-absent). One precondition per tool; the `search` operator isn't allowed. Idempotent writes (retries that shouldn't double-create) are already handled by upsert-by-`external_id` — the precondition is for cross-state guards, not retry safety.
+The guard is **invisible to the agent** — it's part of the toolset config, never a tool parameter — so the agent just calls `book_slot(...)` and the booking integrity is enforced for it. Paths address the current document as `data.<field>`, `version`, or `id` (e.g. `{ "field": "version", "op": "is_null" }` = create-only-if-absent). One precondition per tool; the `search` operator isn't allowed. Idempotent writes (retries that shouldn't double-create) are already handled by upsert-by-`external_id` — the precondition is for cross-state guards, not retry safety.
 
 ## Guarded + unguarded writes on one collection
 
-A `precondition` is one-per-tool, so to expose both a guarded write and a plain write on the same collection, declare two tool entries for that collection with the same operation but distinct `names`. Tool names only need to be unique across the endpoint — a duplicate (collection, operation) pair is fine:
+A `precondition` is one-per-tool, so to expose both a guarded write and a plain write on the same collection, declare two tool entries for that collection with the same operation but distinct `names`. Tool names only need to be unique across the toolset — a duplicate (collection, operation) pair is fine:
 
 ```json
 "tools": [
@@ -138,13 +138,13 @@ When a proxy-backed collection's source declares **named write bindings** (a `cr
 
 The generated `list` tools are lenient about how structured arguments arrive: `filter` is always a JSON-encoded Filter DSL string, while `sort` and any multi-value (`any_of`) parameter accept **either** the native array **or** a JSON-encoded string of it — so an agent that serializes array arguments as strings still works. (`sort` is the same JSON array of `{"field","direction"}` terms described in the Documents section of SKILL.md.)
 
-## Which database serves the endpoint
+## Which database serves the toolset
 
-`mcp.rekor.pro/e/{slug}/mcp` resolves the endpoint from the database your **token** is scoped to. So:
+`mcp.rekor.pro/t/{slug}/mcp` resolves the toolset from the database your **token** is scoped to. So:
 
-- **Production:** promote the endpoint, then connect with a token scoped to the production database (`my-ws`).
-- **Preview (sandbox testing):** connect with a token scoped to the **preview database id** (`my-ws--<preview-slug>`) to serve the not-yet-promoted endpoint.
+- **Production:** promote the toolset, then connect with a token scoped to the production database (`my-ws`).
+- **Preview (sandbox testing):** connect with a token scoped to the **preview database id** (`my-ws--<preview-slug>`) to serve the not-yet-promoted toolset.
 
-If the slug can't be resolved for your token's database (unknown endpoint, or one that only exists in a preview you aren't scoped to), `initialize` returns a clear JSON-RPC error telling you to scope to the preview database id or promote — it won't silently hand back a session with zero tools.
+If the slug can't be resolved for your token's database (unknown toolset, or one that only exists in a preview you aren't scoped to), `initialize` returns a clear JSON-RPC error telling you to scope to the preview database id or promote — it won't silently hand back a session with zero tools.
 
-**Promotion blocking.** Promotion is blocked if it would break a published endpoint — removing a collection or relationship type the endpoint exposes, a field its typed filters, `writable_fields`, or a `precondition` depend on, or a named write binding a tool's `bindings` selects — so promote the endpoint together with the schema change (a dry run lists any such conflicts first).
+**Promotion blocking.** Promotion is blocked if it would break a published toolset — removing a collection or relationship type the toolset exposes, a field its typed filters, `writable_fields`, or a `precondition` depend on, or a named write binding a tool's `bindings` selects — so promote the toolset together with the schema change (a dry run lists any such conflicts first).
