@@ -6,35 +6,35 @@ Import tool definitions from any LLM provider as collections, or export collecti
 
 ```bash
 # OpenAI
-rekor providers import openai --database <ws> --tools '[{"type":"function","function":{"name":"create_invoice","parameters":{"type":"object","properties":{"customer":{"type":"string"},"amount":{"type":"number"}},"required":["customer"]}}}]'
+rekor providers import openai --base <ws> --tools '[{"type":"function","function":{"name":"create_invoice","parameters":{"type":"object","properties":{"customer":{"type":"string"},"amount":{"type":"number"}},"required":["customer"]}}}]'
 
 # Anthropic
-rekor providers import anthropic --database <ws> --tools '[{"name":"create_invoice","input_schema":{"type":"object","properties":{"customer":{"type":"string"}}}}]'
+rekor providers import anthropic --base <ws> --tools '[{"name":"create_invoice","input_schema":{"type":"object","properties":{"customer":{"type":"string"}}}}]'
 
 # MCP
-rekor providers import mcp --database <ws> --tools '[{"name":"create_invoice","inputSchema":{"type":"object","properties":{"customer":{"type":"string"}}}}]'
+rekor providers import mcp --base <ws> --tools '[{"name":"create_invoice","inputSchema":{"type":"object","properties":{"customer":{"type":"string"}}}}]'
 
 # From file
-rekor providers import openai --database <ws> --tools @tools.json
+rekor providers import openai --base <ws> --tools @tools.json
 ```
 
 ## Export (get collections as tool definitions)
 
 ```bash
-rekor providers export openai --database <ws>
-rekor providers export anthropic --database <ws> --collections invoices,customers
-rekor providers export mcp --database <ws> --output tools.json
+rekor providers export openai --base <ws>
+rekor providers export anthropic --base <ws> --collections invoices,customers
+rekor providers export mcp --base <ws> --output tools.json
 ```
 
 ## Import tool call (create a document from provider-native format)
 
 ```bash
 # OpenAI tool call → document
-rekor providers import-call openai invoices --database <ws> \
+rekor providers import-call openai invoices --base <ws> \
   --data '{"arguments":{"customer":"Acme","amount":5000}}' \
   --external-id call_abc123 --external-source openai
 
 # Anthropic tool call → document
-rekor providers import-call anthropic invoices --database <ws> \
+rekor providers import-call anthropic invoices --base <ws> \
   --data '{"input":{"customer":"Acme","amount":5000}}'
 ```

@@ -25,13 +25,13 @@ Deep grammar for the external sources that back a collection with an external AP
 Configure sources as part of the collection schema (preview only, promoted like any schema change):
 
 ```bash
-rekor collections upsert invoices --database my-ws--preview --name "Invoices" \
+rekor collections upsert invoices --base my-ws--preview --name "Invoices" \
   --schema @schema.json --sources @sources.json
 ```
 
 Each source defines:
 - `name` — must equal the document's `external_source`.
-- `auth` — header + value template; the secret can be inline or a `vault:<name>` reference. An **inline** secret is environment-local — promotion never copies it to production, so set it on the production database directly (a newly promoted source stays unconfigured and requests fail with a clear "no usable credential configured" error until you do). A `vault:<name>` reference travels by reference and needs no extra step.
+- `auth` — header + value template; the secret can be inline or a `vault:<name>` reference. An **inline** secret is environment-local — promotion never copies it to production, so set it on the production base directly (a newly promoted source stays unconfigured and requests fail with a clear "no usable credential configured" error until you do). A `vault:<name>` reference travels by reference and needs no extra step.
 - `field_mapping` — optional; omit for identity passthrough. See [below](#field_mapping-rules).
 - `get` / `list` / `create` / `update` / `delete` — per-operation endpoints. See [below](#per-operation-endpoints).
 - `id_path` — how to find the `external_id` in each upstream record. See [below](#id_path).
@@ -69,7 +69,7 @@ The source-level `field_mapping` applies to every op, but an RPC/legacy upstream
 
 ## Per-operation endpoints
 
-`get` / `list` / `create` / `update` / `delete` — per-operation endpoint templates. Each has its own `url` (with `{{external_id}}`, `{{query.*}}`, `{{data.*}}`, `{{current.*}}`/`{{prior.*}}` on update/delete — see below, `{{auth.org_id}}`, `{{auth.database_id}}` tokens) and `method` (any of GET/POST/PUT/PATCH/DELETE) — so **RPC-style verb paths and all-POST upstreams work directly**, e.g. `list: { url: ".../listar_x", method: "POST" }`, `create: { url: ".../incluir_x", method: "POST" }`. `response_path` / `total_path` extract records/count from an envelope (e.g. `response_path: "dados"` pulls the array out of `{ ..., dados: [...] }`).
+`get` / `list` / `create` / `update` / `delete` — per-operation endpoint templates. Each has its own `url` (with `{{external_id}}`, `{{query.*}}`, `{{data.*}}`, `{{current.*}}`/`{{prior.*}}` on update/delete — see below, `{{auth.org_id}}`, `{{auth.base_id}}` tokens) and `method` (any of GET/POST/PUT/PATCH/DELETE) — so **RPC-style verb paths and all-POST upstreams work directly**, e.g. `list: { url: ".../listar_x", method: "POST" }`, `create: { url: ".../incluir_x", method: "POST" }`. `response_path` / `total_path` extract records/count from an envelope (e.g. `response_path: "dados"` pulls the array out of `{ ..., dados: [...] }`).
 
 - `success_path` / `message_path` — for upstreams that return HTTP 200 even on logical failure (`{ "success": false, "message": "..." }`). When `success_path` resolves falsy, the call surfaces as an error carrying the `message_path` text instead of being mistaken for data. (Dot-paths, like `response_path` — not JSONPath.)
 
@@ -94,7 +94,7 @@ Dot-path to the `external_id` within each **raw** upstream record, for upstreams
 - **Static constants** need no special field: bake constant **query** params into the `url` (`".../listar?clinica=35"`), and put constant non-secret **headers** in `endpoint.headers` (`{ "X-Tenant": "35" }`). For a constant **body** param use `static_body`; for a secret use `injections`.
 - `request_encoding` — `json` (default) or `form` to send `application/x-www-form-urlencoded` bodies for legacy form-post upstreams.
 - `static_body` — constant, non-secret params merged into every body-bearing request (incl. POST-based reads), e.g. a fixed tenant id the agent never supplies. Agent data and `injections` win on a key collision.
-- `body_template` (per `create`/`update`/`delete` endpoint) — map of body field → templated string, interpolated against the same per-op tokens as that endpoint's `url` (`{{external_id}}`, `{{data.*}}`, `{{query.*}}`, `{{auth.org_id}}`/`{{auth.database_id}}`) and merged into the request body. Use it to put the document id — or any addressable value — **into** the body for RPC/legacy upstreams that key the update/cancel verb by id in the body rather than the URL, e.g. `"update": { …, "body_template": { "agendamento_id": "{{external_id}}" } }`. Body-bearing ops only — create/update, and a `delete` whose method carries a body (POST/PUT/PATCH); rejected on get/list and on any GET/DELETE-method endpoint (no body to carry it). Unlike `static_body` (constants, never templated) its values are filled per request; on a key collision agent data is overlaid by `body_template`, and `injections` win over both. Values are filled as **strings** (the same as `url`/header tokens) — for a numeric/boolean field an upstream is strict about, send it through `field_mapping` or `static_body` instead.
+- `body_template` (per `create`/`update`/`delete` endpoint) — map of body field → templated string, interpolated against the same per-op tokens as that endpoint's `url` (`{{external_id}}`, `{{data.*}}`, `{{query.*}}`, `{{auth.org_id}}`/`{{auth.base_id}}`) and merged into the request body. Use it to put the document id — or any addressable value — **into** the body for RPC/legacy upstreams that key the update/cancel verb by id in the body rather than the URL, e.g. `"update": { …, "body_template": { "agendamento_id": "{{external_id}}" } }`. Body-bearing ops only — create/update, and a `delete` whose method carries a body (POST/PUT/PATCH); rejected on get/list and on any GET/DELETE-method endpoint (no body to carry it). Unlike `static_body` (constants, never templated) its values are filled per request; on a key collision agent data is overlaid by `body_template`, and `injections` win over both. Values are filled as **strings** (the same as `url`/header tokens) — for a numeric/boolean field an upstream is strict about, send it through `field_mapping` or `static_body` instead.
 
 ## `current` / `prior`
 
@@ -103,7 +103,7 @@ Dot-path to the `external_id` within each **raw** upstream record, for upstreams
 ## Other source options
 
 - `injections` — extra per-request vault secrets placed into a header or body field (for upstreams needing their own credential).
-- `executor_secrets` — named vault credentials an executor pulls at dispatch, for a binary or large per-tenant credential it can't take inline (e.g. an mTLS client certificate). Each `{name, secret_ref}` declares a `vault:<name>` reference (templating only `{{auth.org_id}}`/`{{auth.database_id}}`); each pull is short-lived and single-use, scoped to the calling database. See `references/executors.md`.
+- `executor_secrets` — named vault credentials an executor pulls at dispatch, for a binary or large per-tenant credential it can't take inline (e.g. an mTLS client certificate). Each `{name, secret_ref}` declares a `vault:<name>` reference (templating only `{{auth.org_id}}`/`{{auth.base_id}}`); each pull is short-lived and single-use, scoped to the calling base. See `references/executors.md`.
 - `cache_ttl` (seconds) + `stale_if_error` — read-through caching, optionally serving the last-known value on a transient upstream failure.
 - `signing` — opt into HMAC request signing when the source points at an executor (adds `X-Rekor-Signature` + `X-Rekor-Timestamp`); omit for third-party APIs.
 - `timeout_ms` — per-request upstream timeout (default 10s, max 30s); a timeout surfaces as a transient error so `stale_if_error` can serve a cached value.

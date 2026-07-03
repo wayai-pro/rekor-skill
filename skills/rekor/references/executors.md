@@ -142,8 +142,8 @@ const pfx = Buffer.from(cert.value, 'base64');                   // value is ver
 // ...present `pfx` over mutual-TLS to the upstream (on Fly.io — mutual-TLS lives in the executor, not Rekor).
 ```
 
-For a per-tenant cert, template the reference: `"secret_ref": "vault:partner-cert-{{auth.database_id}}"`
-resolves each calling database's own credential (only `{{auth.org_id}}`/`{{auth.database_id}}` are allowed).
+For a per-tenant cert, template the reference: `"secret_ref": "vault:partner-cert-{{auth.base_id}}"`
+resolves each calling base's own credential (only `{{auth.org_id}}`/`{{auth.base_id}}` are allowed).
 The cert stays in Rekor — the executor stays stateless, the pull is scoped + audited, and the credential
 rotates centrally (rotate installs a new value you supply; it is never auto-generated).
 

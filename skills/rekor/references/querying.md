@@ -10,30 +10,30 @@ Deep how-to for reading documents: the SQL example gallery, `search`-field tunin
 
 ## SQL query examples
 
-All queries must include BOTH `org_id = {org_id:String}` AND `database_id = {database_id:String}`, plus `deleted = false` (and `archived = false` for active-only). Access JSON fields with `data.field.:Type` subcolumn syntax, or `CAST(data.field, 'Type')` for type-safe conversion.
+All queries must include BOTH `org_id = {org_id:String}` AND `base_id = {base_id:String}`, plus `deleted = false` (and `archived = false` for active-only). Access JSON fields with `data.field.:Type` subcolumn syntax, or `CAST(data.field, 'Type')` for type-safe conversion.
 
 ```bash
 # Simple query
-rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false" --database my-ws
+rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status FROM documents WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND collection = 'invoices' AND deleted = false" --base my-ws
 
 # Aggregation
-rekor sql "SELECT data.status.:String as status, count() as cnt FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY status" --database my-ws
+rekor sql "SELECT data.status.:String as status, count() as cnt FROM documents WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND collection = 'invoices' AND deleted = false GROUP BY status" --base my-ws
 
 # Array aggregation (sum embedded line items)
-rekor sql "SELECT data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false" --database my-ws
+rekor sql "SELECT data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND collection = 'invoices' AND deleted = false" --base my-ws
 
 # Explode array elements with ARRAY JOIN
-rekor sql "SELECT item.description.:String as item, sum(CAST(item.amount, 'Float64')) as revenue FROM documents ARRAY JOIN data.line_items[] as item WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false GROUP BY item ORDER BY revenue DESC" --database my-ws
+rekor sql "SELECT item.description.:String as item, sum(CAST(item.amount, 'Float64')) as revenue FROM documents ARRAY JOIN data.line_items[] as item WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND collection = 'invoices' AND deleted = false GROUP BY item ORDER BY revenue DESC" --base my-ws
 
 # CTE joining documents with relationships
-rekor sql "WITH inv AS (SELECT id, data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'invoices' AND deleted = false), pay AS (SELECT target_id, sum(CAST(data.allocated, 'Float64')) as paid FROM relationships WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND rel_type = 'payment_for' AND deleted = false GROUP BY target_id) SELECT inv.num, inv.total, coalesce(pay.paid, 0) as paid, inv.total - coalesce(pay.paid, 0) as balance FROM inv LEFT JOIN pay ON pay.target_id = inv.id ORDER BY balance DESC" --database my-ws
+rekor sql "WITH inv AS (SELECT id, data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND collection = 'invoices' AND deleted = false), pay AS (SELECT target_id, sum(CAST(data.allocated, 'Float64')) as paid FROM relationships WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND rel_type = 'payment_for' AND deleted = false GROUP BY target_id) SELECT inv.num, inv.total, coalesce(pay.paid, 0) as paid, inv.total - coalesce(pay.paid, 0) as balance FROM inv LEFT JOIN pay ON pay.target_id = inv.id ORDER BY balance DESC" --base my-ws
 
 # With parameters
-rekor sql "SELECT * FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND data.status.:String = {status:String} AND deleted = false" --database my-ws --param status=issued
+rekor sql "SELECT * FROM documents WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND data.status.:String = {status:String} AND deleted = false" --base my-ws --param status=issued
 
 # Fuzzy / approximate text match, ranked by closeness (power-user form of `documents query --filter {op:search}`).
 # Fold case + accents on BOTH sides so "São" matches "sao"; jaroWinklerSimilarity suits short names.
-rekor sql "SELECT *, jaroWinklerSimilarity(lowerUTF8(data.car_model.:String), lowerUTF8({q:String})) AS score FROM documents WHERE org_id = {org_id:String} AND database_id = {database_id:String} AND collection = 'vehicles' AND deleted = false AND score >= 0.85 ORDER BY score DESC LIMIT 10" --database my-ws --param q='honda civic'
+rekor sql "SELECT *, jaroWinklerSimilarity(lowerUTF8(data.car_model.:String), lowerUTF8({q:String})) AS score FROM documents WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND collection = 'vehicles' AND deleted = false AND score >= 0.85 ORDER BY score DESC LIMIT 10" --base my-ws --param q='honda civic'
 ```
 
 ## Search tuning
@@ -67,18 +67,18 @@ Omit `--sort` when using `search` to keep the relevance ranking.
 
 Declare datetime fields in the collection schema with `"format": "date-time"` (or `"format": "date"` for date-only). Rekor stores them in a single canonical form: a naive value (no offset) gets the collection's timezone attached, so `2026-06-11T13:00:00` is stored and returned as `2026-06-11T13:00:00-03:00` — the same shape from both `query` and a single-document read, with no UTC math required of you.
 
-Set the timezone with `"x-timezone": "America/Sao_Paulo"` on the collection schema, or set a database-wide default that every collection without its own `x-timezone` inherits — the resolution order is collection `x-timezone` → database `settings.timezone` → UTC. Set the database default from the CLI with `--timezone` (at create or update time), or via REST `PUT /v1/databases/<id>` with a `settings.timezone` body:
+Set the timezone with `"x-timezone": "America/Sao_Paulo"` on the collection schema, or set a base-wide default that every collection without its own `x-timezone` inherits — the resolution order is collection `x-timezone` → base `settings.timezone` → UTC. Set the base default from the CLI with `--timezone` (at create or update time), or via REST `PUT /v1/bases/<id>` with a `settings.timezone` body:
 
 ```bash
-rekor databases create <database-id> --name "My DB" --timezone America/Sao_Paulo
-rekor databases update <database-id> --timezone America/Sao_Paulo
+rekor bases create <base-id> --name "My DB" --timezone America/Sao_Paulo
+rekor bases update <base-id> --timezone America/Sao_Paulo
 # or via REST:
-curl -X PUT https://api.rekor.pro/v1/databases/<database-id> \
+curl -X PUT https://api.rekor.pro/v1/bases/<base-id> \
   -H "Authorization: Bearer $REKOR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{ "settings": { "timezone": "America/Sao_Paulo" } }'
 ```
 
-The value must be a valid IANA timezone (invalid names are rejected server-side). `rekor databases update --timezone` merges into the existing `settings` (it preserves other keys); the raw REST `PUT` and `--settings` flag **replace** the `settings` object wholesale, so send the full object. Omitted top-level fields (`name`, `description`, `tags`) are left unchanged on an existing database.
+The value must be a valid IANA timezone (invalid names are rejected server-side). `rekor bases update --timezone` merges into the existing `settings` (it preserves other keys); the raw REST `PUT` and `--settings` flag **replace** the `settings` object wholesale, so send the full object. Omitted top-level fields (`name`, `description`, `tags`) are left unchanged on an existing base.
 
 **Filtering is instant-aware:** `eq`/`neq`/`in`/`not_in` and the range operators match datetimes by point-in-time, so the exact representation you pass (`T` vs space, with or without offset) doesn't change the result — `{ "field": "data.starts_at", "op": "eq", "value": "2026-06-11T13:00:00" }` matches the stored value regardless of how it was written. Use `eq` for an exact datetime, not `like` (which is plain substring matching). Raw `rekor sql` is **not** rewritten this way — match the canonical stored form (or prefer the Filter DSL `query` for datetime conditions).

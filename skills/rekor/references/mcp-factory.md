@@ -22,25 +22,25 @@ A toolset `tools[]` entry only accepts `tool`, `tool_name`, and `description_ove
 - [Guarded + unguarded writes on one collection](#guarded--unguarded-writes-on-one-collection)
 - [Selecting a named write binding (`binding`)](#selecting-a-named-write-binding-binding)
 - [Lenient list-tool arguments](#lenient-list-tool-arguments)
-- [Which database serves the toolset](#which-database-serves-the-toolset)
+- [Which base serves the toolset](#which-base-serves-the-toolset)
 
 ## Full authoring example
 
 **Step 1 — author the Tools.** One collection + one operation each; the `id` becomes the agent-facing tool name.
 
 ```bash
-rekor tools upsert search_invoices --database my-ws --collection invoices --operation list \
+rekor tools upsert search_invoices --base my-ws --collection invoices --operation list \
   --description "Search invoices by customer, status, or date range"
-rekor tools upsert get_invoice   --database my-ws --collection invoices --operation get
-rekor tools upsert create_payment --database my-ws --collection payments --operation create
-rekor tools upsert get_payment    --database my-ws --collection payments --operation get
-rekor tools upsert list_payments  --database my-ws --collection payments --operation list
+rekor tools upsert get_invoice   --base my-ws --collection invoices --operation get
+rekor tools upsert create_payment --base my-ws --collection payments --operation create
+rekor tools upsert get_payment    --base my-ws --collection payments --operation get
+rekor tools upsert list_payments  --base my-ws --collection payments --operation list
 ```
 
 **Step 2 — compose the toolset by reference.** Use `--config` with full JSON (or `--config @toolset.json`) for advanced control:
 
 ```bash
-rekor toolsets upsert invoicing-agent --database my-ws --config '{
+rekor toolsets upsert invoicing-agent --base my-ws --config '{
   "name": "Invoicing Agent",
   "tools": [
     { "tool": "search_invoices" },
@@ -61,7 +61,7 @@ rekor toolsets upsert invoicing-agent --database my-ws --config '{
 }'
 ```
 
-For a quick toolset without per-Tool shaping, skip the JSON and reference Tools by id on the flags: `rekor toolsets upsert invoicing-agent --database my-ws --name "Invoicing Agent" --tool search_invoices --tool get_invoice --tool create_payment --relationship invoice_payment:create,list --sql-query`. A `--tool <id>=<surface_name>` form renames the surface tool (see below).
+For a quick toolset without per-Tool shaping, skip the JSON and reference Tools by id on the flags: `rekor toolsets upsert invoicing-agent --base my-ws --name "Invoicing Agent" --tool search_invoices --tool get_invoice --tool create_payment --relationship invoice_payment:create,list --sql-query`. A `--tool <id>=<surface_name>` form renames the surface tool (see below).
 
 Relationship tools and `batch` are still declared inline on the toolset (they are not first-class Tools): a relationship entry is `{ rel_type, operations, name?, names?, description_override? }`; `batch` is `{ "enabled": true, "operations": { "invoices": ["create","update"] } }`.
 
@@ -81,7 +81,7 @@ Tool names must be unique across the toolset, so if you reference the same Tool 
 A read-shape knob on a **`list`** Tool. Expose chosen fields of a collection as typed parameters on the generated `list` tool, derived from the collection schema — so the agent fills native arguments instead of writing a filter expression.
 
 ```bash
-rekor tools upsert search_invoices --database my-ws --collection invoices --operation list --config '{
+rekor tools upsert search_invoices --base my-ws --collection invoices --operation list --config '{
   "filterable_fields": [
     { "field": "status" },
     { "field": "issued_at" },
@@ -103,7 +103,7 @@ Per field you may set `param` (rename the generated param), `match` (`exact` | `
 Read-shape knobs on a **`list`** Tool. When the typed params cover everything an agent needs, set `"expose_filter": false` on the Tool to drop the generic `filter` parameter entirely — keeping the agent-facing tool schema small. Server-side translation of the typed params is unaffected.
 
 ```bash
-rekor tools upsert search_invoices --database my-ws --collection invoices --operation list --config '{
+rekor tools upsert search_invoices --base my-ws --collection invoices --operation list --config '{
   "expose_filter": false,
   "default_limit": 50,
   "filterable_fields": [ { "field": "status" } ]
@@ -120,7 +120,7 @@ A write-shape knob on a **`create`**/**`update`** Tool — the write-side mirror
 - **A rich, typed write schema.** The tool's `data` parameter is generated from the collection schema for just those fields — their types, enums, formats, `required`, and descriptions — instead of a generic "any object" slot. The agent gets the same typed, described, validated guidance on writes that `filterable_fields` gives on reads.
 
 ```bash
-rekor tools upsert reschedule_appointment --database my-ws --collection appointments --operation update --config '{
+rekor tools upsert reschedule_appointment --base my-ws --collection appointments --operation update --config '{
   "writable_fields": [
     { "field": "start_time", "param": "when", "description": "New start time (ISO 8601)" }
   ]
@@ -134,7 +134,7 @@ Per field you may set `param` (rename the key the agent sets in `data` — the t
 A write-shape knob on a **`create`**/**`update`** Tool — a Filter DSL expression checked against the document's **current** state before the write applies. If it does not hold, the write is rejected with a 409 conflict and nothing changes; if it holds, the write proceeds. This turns a fragile read-then-write into one correct, race-free call: model a bookable slot as a document and make "book it" a guarded update, so two agents cannot both book the same slot.
 
 ```bash
-rekor tools upsert book_slot --database my-ws --collection slots --operation update --config '{
+rekor tools upsert book_slot --base my-ws --collection slots --operation update --config '{
   "precondition": { "field": "data.status", "op": "eq", "value": "free" }
 }'
 ```
@@ -146,10 +146,10 @@ The guard is **invisible to the agent** — it is part of the Tool config, never
 A `precondition` is one-per-Tool, so to expose both a guarded write and a plain write on the same collection, author **two Tools** for that collection with the same operation but distinct ids, then reference both:
 
 ```bash
-rekor tools upsert book_slot   --database my-ws --collection slots --operation update --config '{
+rekor tools upsert book_slot   --base my-ws --collection slots --operation update --config '{
   "precondition": { "field": "data.status", "op": "eq", "value": "free" }
 }'
-rekor tools upsert manage_slot --database my-ws --collection slots --operation update
+rekor tools upsert manage_slot --base my-ws --collection slots --operation update
 ```
 
 ```json
@@ -169,8 +169,8 @@ rekor tools upsert manage_slot --database my-ws --collection slots --operation u
 A write-shape knob on a **`create`**/**`update`**/**`delete`** Tool. When a proxy-backed collection's source declares **named write bindings** (a `create`/`update`/`delete` op given as a map of named endpoint variants — see `references/external-sources.md`), a write Tool picks which one it dispatches to with a `binding`:
 
 ```bash
-rekor tools upsert book_trial  --database my-ws --collection bookings --operation create --config '{ "binding": "trial" }'
-rekor tools upsert book_makeup --database my-ws --collection bookings --operation create --config '{ "binding": "makeup" }'
+rekor tools upsert book_trial  --base my-ws --collection bookings --operation create --config '{ "binding": "trial" }'
+rekor tools upsert book_makeup --base my-ws --collection bookings --operation create --config '{ "binding": "makeup" }'
 ```
 
 This is what keeps one canonical collection (`bookings`) serving a backend whose writes fan out to several endpoints: author two `create` Tools with distinct ids (`book_trial`, `book_makeup`) selecting different bindings (`trial`, `makeup`) of the same source, then reference both from the toolset. The agent never sees a `binding` parameter — it is injected server-side, exactly like `precondition`. Required when the bound op is a binding map with no `default`; rejected when the op is a single endpoint or names a binding the source does not declare (validated at config-write and re-checked at promotion).
@@ -179,13 +179,13 @@ This is what keeps one canonical collection (`bookings`) serving a backend whose
 
 The generated `list` tools are lenient about how structured arguments arrive: `filter` is always a JSON-encoded Filter DSL string, while `sort` and any multi-value (`any_of`) parameter accept **either** the native array **or** a JSON-encoded string of it — so an agent that serializes array arguments as strings still works. (`sort` is the same JSON array of `{"field","direction"}` terms described in the Documents section of SKILL.md.)
 
-## Which database serves the toolset
+## Which base serves the toolset
 
-`mcp.rekor.pro/t/{slug}/mcp` resolves the toolset from the database your **token** is scoped to. So:
+`mcp.rekor.pro/t/{slug}/mcp` resolves the toolset from the base your **token** is scoped to. So:
 
-- **Production:** promote the toolset (and the Tools it references), then connect with a token scoped to the production database (`my-ws`).
-- **Preview (sandbox testing):** connect with a token scoped to the **preview database id** (`my-ws--<preview-slug>`) to serve the not-yet-promoted toolset.
+- **Production:** promote the toolset (and the Tools it references), then connect with a token scoped to the production base (`my-ws`).
+- **Preview (sandbox testing):** connect with a token scoped to the **preview base id** (`my-ws--<preview-slug>`) to serve the not-yet-promoted toolset.
 
-If the slug cannot be resolved for your token's database (unknown toolset, or one that only exists in a preview you are not scoped to), `initialize` returns a clear JSON-RPC error telling you to scope to the preview database id or promote — it will not silently hand back a session with zero tools.
+If the slug cannot be resolved for your token's base (unknown toolset, or one that only exists in a preview you are not scoped to), `initialize` returns a clear JSON-RPC error telling you to scope to the preview base id or promote — it will not silently hand back a session with zero tools.
 
 **Promotion blocking.** Promotion is blocked if it would break a published toolset — removing a collection or relationship type it exposes, dropping a Tool a reference points at, or removing a field its `filterable_fields`, `writable_fields`, or `precondition` depend on, or a named write binding a Tool's `binding` selects — so promote the Tools and toolset together with the schema change (a dry run lists any such conflicts first).
