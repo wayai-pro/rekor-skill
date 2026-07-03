@@ -1,7 +1,7 @@
 # Building an Executor
 
 An **executor** is a small, stateless HTTP service you deploy to act on the outside world on Rekor's
-behalf. Rekor is the system of record: it holds documents, brokers credentials, and dispatches signed
+behalf. Rekor is the system of record: it holds records, brokers credentials, and dispatches signed
 requests. The executor receives those requests, does the real work (call a third-party API, present a
 client certificate, run logic Rekor can't), and writes the result back.
 
@@ -14,14 +14,14 @@ Agent → Rekor (record + sign + dispatch) → Executor (verify + act) → resul
 ```
 
 Rekor reaches an executor two ways, both signed identically:
-- **Triggers** — Rekor POSTs to the executor's URL when documents change (outbound webhooks).
-- **External sources** — Rekor proxies a document read/write through to the executor's URL.
+- **Triggers** — Rekor POSTs to the executor's URL when records change (outbound webhooks).
+- **External sources** — Rekor proxies a record read/write through to the executor's URL.
 
 ### Do you even need an executor?
 
 If your upstream is a REST/JSON API Rekor can call directly, configure an external source with field
 mapping — **no executor required**. Build an executor only when:
-- a **trigger** must run custom logic when documents change, or
+- a **trigger** must run custom logic when records change, or
 - an external-source call can't be a direct HTTP request Rekor makes itself — mutual-TLS, SOAP or raw
   TCP, binary per-tenant credentials, multi-call orchestration, or heavier processing.
 

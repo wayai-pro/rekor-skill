@@ -26,15 +26,15 @@ rekor providers export anthropic --base <ws> --record_types invoices,customers
 rekor providers export mcp --base <ws> --output tools.json
 ```
 
-## Import tool call (create a document from provider-native format)
+## Import tool call (create a record from provider-native format)
 
 ```bash
-# OpenAI tool call → document
+# OpenAI tool call → record
 rekor providers import-call openai invoices --base <ws> \
   --data '{"arguments":{"customer":"Acme","amount":5000}}' \
   --external-id call_abc123 --external-source openai
 
-# Anthropic tool call → document
+# Anthropic tool call → record
 rekor providers import-call anthropic invoices --base <ws> \
   --data '{"input":{"customer":"Acme","amount":5000}}'
 ```

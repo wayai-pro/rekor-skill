@@ -1,6 +1,6 @@
 # Querying & search reference
 
-Deep how-to for reading documents: the SQL example gallery, `search`-field tuning (`x-search`), and datetime configuration. The SKILL.md **Documents** and **SQL Query** sections cover the concepts, the Filter DSL operators, and the mandatory rules; read this file for worked examples and tuning knobs.
+Deep how-to for reading records: the SQL example gallery, `search`-field tuning (`x-search`), and datetime configuration. The SKILL.md **Records** and **SQL Query** sections cover the concepts, the Filter DSL operators, and the mandatory rules; read this file for worked examples and tuning knobs.
 
 ## Contents
 
@@ -14,26 +14,26 @@ All queries must include BOTH `org_id = {org_id:String}` AND `base_id = {base_id
 
 ```bash
 # Simple query
-rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status FROM documents WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND record_type = 'invoices' AND deleted = false" --base my-ws
+rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status FROM records WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND record_type = 'invoices' AND deleted = false" --base my-ws
 
 # Aggregation
-rekor sql "SELECT data.status.:String as status, count() as cnt FROM documents WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND record_type = 'invoices' AND deleted = false GROUP BY status" --base my-ws
+rekor sql "SELECT data.status.:String as status, count() as cnt FROM records WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND record_type = 'invoices' AND deleted = false GROUP BY status" --base my-ws
 
 # Array aggregation (sum embedded line items)
-rekor sql "SELECT data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND record_type = 'invoices' AND deleted = false" --base my-ws
+rekor sql "SELECT data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM records WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND record_type = 'invoices' AND deleted = false" --base my-ws
 
 # Explode array elements with ARRAY JOIN
-rekor sql "SELECT item.description.:String as item, sum(CAST(item.amount, 'Float64')) as revenue FROM documents ARRAY JOIN data.line_items[] as item WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND record_type = 'invoices' AND deleted = false GROUP BY item ORDER BY revenue DESC" --base my-ws
+rekor sql "SELECT item.description.:String as item, sum(CAST(item.amount, 'Float64')) as revenue FROM records ARRAY JOIN data.line_items[] as item WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND record_type = 'invoices' AND deleted = false GROUP BY item ORDER BY revenue DESC" --base my-ws
 
-# CTE joining documents with relationships
-rekor sql "WITH inv AS (SELECT id, data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM documents WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND record_type = 'invoices' AND deleted = false), pay AS (SELECT target_id, sum(CAST(data.allocated, 'Float64')) as paid FROM relationships WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND rel_type = 'payment_for' AND deleted = false GROUP BY target_id) SELECT inv.num, inv.total, coalesce(pay.paid, 0) as paid, inv.total - coalesce(pay.paid, 0) as balance FROM inv LEFT JOIN pay ON pay.target_id = inv.id ORDER BY balance DESC" --base my-ws
+# CTE joining records with relationships
+rekor sql "WITH inv AS (SELECT id, data.invoice_number.:String as num, arraySum(CAST(data.line_items[].amount, 'Array(Float64)')) as total FROM records WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND record_type = 'invoices' AND deleted = false), pay AS (SELECT target_id, sum(CAST(data.allocated, 'Float64')) as paid FROM relationships WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND rel_type = 'payment_for' AND deleted = false GROUP BY target_id) SELECT inv.num, inv.total, coalesce(pay.paid, 0) as paid, inv.total - coalesce(pay.paid, 0) as balance FROM inv LEFT JOIN pay ON pay.target_id = inv.id ORDER BY balance DESC" --base my-ws
 
 # With parameters
-rekor sql "SELECT * FROM documents WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND data.status.:String = {status:String} AND deleted = false" --base my-ws --param status=issued
+rekor sql "SELECT * FROM records WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND data.status.:String = {status:String} AND deleted = false" --base my-ws --param status=issued
 
-# Fuzzy / approximate text match, ranked by closeness (power-user form of `documents query --filter {op:search}`).
+# Fuzzy / approximate text match, ranked by closeness (power-user form of `records query --filter {op:search}`).
 # Fold case + accents on BOTH sides so "São" matches "sao"; jaroWinklerSimilarity suits short names.
-rekor sql "SELECT *, jaroWinklerSimilarity(lowerUTF8(data.car_model.:String), lowerUTF8({q:String})) AS score FROM documents WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND record_type = 'vehicles' AND deleted = false AND score >= 0.85 ORDER BY score DESC LIMIT 10" --base my-ws --param q='honda civic'
+rekor sql "SELECT *, jaroWinklerSimilarity(lowerUTF8(data.car_model.:String), lowerUTF8({q:String})) AS score FROM records WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND record_type = 'vehicles' AND deleted = false AND score >= 0.85 ORDER BY score DESC LIMIT 10" --base my-ws --param q='honda civic'
 ```
 
 ## Search tuning
@@ -59,13 +59,13 @@ Every field is searchable by default — `search` needs no setup. Exact filters 
 - `mode: "fuzzy"` — codes / SKUs / IDs where typos dominate.
 - `threshold` (0–1) — minimum closeness to return; `searchable: false` — forbid searching a field (e.g. a large free-text blob you never want scanned).
 
-Tuning is optional — unset fields use a sensible default. `x-search` hints apply to **top-level fields**; `search` still works on nested paths (e.g. `data.address.city`) using the default behavior, they just aren't individually tuned. Search runs against the latest synced data, so a document written a moment earlier may take a brief moment to appear.
+Tuning is optional — unset fields use a sensible default. `x-search` hints apply to **top-level fields**; `search` still works on nested paths (e.g. `data.address.city`) using the default behavior, they just aren't individually tuned. Search runs against the latest synced data, so a record written a moment earlier may take a brief moment to appear.
 
 Omit `--sort` when using `search` to keep the relevance ranking.
 
 ## Datetime configuration
 
-Declare datetime fields in the record_type schema with `"format": "date-time"` (or `"format": "date"` for date-only). Rekor stores them in a single canonical form: a naive value (no offset) gets the record_type's timezone attached, so `2026-06-11T13:00:00` is stored and returned as `2026-06-11T13:00:00-03:00` — the same shape from both `query` and a single-document read, with no UTC math required of you.
+Declare datetime fields in the record_type schema with `"format": "date-time"` (or `"format": "date"` for date-only). Rekor stores them in a single canonical form: a naive value (no offset) gets the record_type's timezone attached, so `2026-06-11T13:00:00` is stored and returned as `2026-06-11T13:00:00-03:00` — the same shape from both `query` and a single-record read, with no UTC math required of you.
 
 Set the timezone with `"x-timezone": "America/Sao_Paulo"` on the record_type schema, or set a base-wide default that every record_type without its own `x-timezone` inherits — the resolution order is record_type `x-timezone` → base `settings.timezone` → UTC. Set the base default from the CLI with `--timezone` (at create or update time), or via REST `PUT /v1/bases/<id>` with a `settings.timezone` body:
 

@@ -131,7 +131,7 @@ Per field you may set `param` (rename the key the agent sets in `data` — the t
 
 ## Conditional writes (`precondition`)
 
-A write-shape knob on a **`create`**/**`update`** Tool — a Filter DSL expression checked against the document's **current** state before the write applies. If it does not hold, the write is rejected with a 409 conflict and nothing changes; if it holds, the write proceeds. This turns a fragile read-then-write into one correct, race-free call: model a bookable slot as a document and make "book it" a guarded update, so two agents cannot both book the same slot.
+A write-shape knob on a **`create`**/**`update`** Tool — a Filter DSL expression checked against the record's **current** state before the write applies. If it does not hold, the write is rejected with a 409 conflict and nothing changes; if it holds, the write proceeds. This turns a fragile read-then-write into one correct, race-free call: model a bookable slot as a record and make "book it" a guarded update, so two agents cannot both book the same slot.
 
 ```bash
 rekor tools upsert book_slot --base my-ws --record_type slots --operation update --config '{
@@ -139,7 +139,7 @@ rekor tools upsert book_slot --base my-ws --record_type slots --operation update
 }'
 ```
 
-The guard is **invisible to the agent** — it is part of the Tool config, never a tool parameter — so the agent just calls `book_slot(...)` and the booking integrity is enforced for it. Paths address the current document as `data.<field>`, `version`, or `id` (e.g. `{ "field": "version", "op": "is_null" }` = create-only-if-absent). One precondition per Tool; the `search` operator is not allowed. Idempotent writes (retries that should not double-create) are already handled by upsert-by-`external_id` — the precondition is for cross-state guards, not retry safety.
+The guard is **invisible to the agent** — it is part of the Tool config, never a tool parameter — so the agent just calls `book_slot(...)` and the booking integrity is enforced for it. Paths address the current record as `data.<field>`, `version`, or `id` (e.g. `{ "field": "version", "op": "is_null" }` = create-only-if-absent). One precondition per Tool; the `search` operator is not allowed. Idempotent writes (retries that should not double-create) are already handled by upsert-by-`external_id` — the precondition is for cross-state guards, not retry safety.
 
 ## Guarded + unguarded writes on one record_type
 
@@ -177,7 +177,7 @@ This is what keeps one canonical record_type (`bookings`) serving a backend whos
 
 ## Lenient list-tool arguments
 
-The generated `list` tools are lenient about how structured arguments arrive: `filter` is always a JSON-encoded Filter DSL string, while `sort` and any multi-value (`any_of`) parameter accept **either** the native array **or** a JSON-encoded string of it — so an agent that serializes array arguments as strings still works. (`sort` is the same JSON array of `{"field","direction"}` terms described in the Documents section of SKILL.md.)
+The generated `list` tools are lenient about how structured arguments arrive: `filter` is always a JSON-encoded Filter DSL string, while `sort` and any multi-value (`any_of`) parameter accept **either** the native array **or** a JSON-encoded string of it — so an agent that serializes array arguments as strings still works. (`sort` is the same JSON array of `{"field","direction"}` terms described in the Records section of SKILL.md.)
 
 ## Which base serves the toolset
 
