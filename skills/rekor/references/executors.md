@@ -90,7 +90,7 @@ key (so an at-least-once delivery never double-acts), and a normalized error env
   ```ts
   import { signRequest } from 'rekor-sdk'
   const url = 'https://api.rekor.pro/inbound/<org>/<db>/<inbound_webhook_id>/ingest'
-  const body = JSON.stringify({ collection: 'results', data: { /* ... */ } })
+  const body = JSON.stringify({ record_type: 'results', data: { /* ... */ } })
   const headers = await signRequest({ secret: process.env.REKOR_HOOK_SECRET!, method: 'POST', url, body })
   await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body })
   ```

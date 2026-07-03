@@ -1,8 +1,8 @@
 # Provider Adapters reference
 
-Import tool definitions from any LLM provider as collections, or export collections as tool definitions. Supported providers: `openai`, `anthropic`, `google`, `mcp`. The SKILL.md **Provider Adapters** section covers the concept; read this file for the command forms.
+Import tool definitions from any LLM provider as record_types, or export record_types as tool definitions. Supported providers: `openai`, `anthropic`, `google`, `mcp`. The SKILL.md **Provider Adapters** section covers the concept; read this file for the command forms.
 
-## Import (creates collections from tool definitions)
+## Import (creates record_types from tool definitions)
 
 ```bash
 # OpenAI
@@ -18,11 +18,11 @@ rekor providers import mcp --base <ws> --tools '[{"name":"create_invoice","input
 rekor providers import openai --base <ws> --tools @tools.json
 ```
 
-## Export (get collections as tool definitions)
+## Export (get record_types as tool definitions)
 
 ```bash
 rekor providers export openai --base <ws>
-rekor providers export anthropic --base <ws> --collections invoices,customers
+rekor providers export anthropic --base <ws> --record_types invoices,customers
 rekor providers export mcp --base <ws> --output tools.json
 ```
 
