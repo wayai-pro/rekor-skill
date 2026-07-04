@@ -175,6 +175,28 @@ rekor actions upsert book_makeup --base my-ws --record_type bookings --operation
 
 This is what keeps one canonical record_type (`bookings`) serving a backend whose writes fan out to several endpoints: author two `create` Actions with distinct ids (`book_trial`, `book_makeup`) selecting different bindings (`trial`, `makeup`) of the same source, then reference both from the toolset. The agent never sees a `binding` parameter — it is injected server-side, exactly like `precondition`. Required when the bound op is a binding map with no `default`; rejected when the op is a single endpoint or names a binding the source does not declare (validated at config-write and re-checked at promotion).
 
+## Composite Actions (atomic multi-entity writes)
+
+An Action can instead be a **composite** — an ordered list of write `steps[]` executed **atomically** as one MCP tool. All steps commit together or none do, so an agent gets a single semantic call (e.g. `place_order`) instead of a fragile create-then-link-then-update sequence it could leave half-applied.
+
+- Each step is one native write: a record `create`/`update`/`delete`, or a relationship `create`/`delete`. Give each a unique `key` (it namespaces that step's inputs on the generated tool). A composite has `steps` **instead of** the top-level `record_type`/`operation`.
+- **Per-step guards, AND-combined.** A step may carry a `precondition` (the same compare-and-set Filter DSL as a single write). If *any* step's precondition fails, the whole action is rejected (409) and nothing is written — so you can gate a multi-record write on the current state of several records at once.
+- Steps must be **native** record_types (a proxy/external-backed record_type can't join the atomic write — rejected when you save the action).
+- Author it with `--config` (the flags cover single-op only):
+
+```
+rekor actions upsert place_order --base my-ws --config '{
+  "description": "Create an order and its first line atomically",
+  "steps": [
+    { "key": "order", "record_type": "orders",      "operation": "create", "writable_fields": [{ "field": "status" }, { "field": "total" }] },
+    { "key": "line",  "record_type": "order_lines", "operation": "create" }
+  ]
+}'
+```
+
+- Reference it from a toolset like any Action (`--action place_order`, or an `actions: [{ "action": "place_order" }]` entry). The generated tool takes one input object per step key — record steps take `data` (+ `external_id` for an idempotent upsert, or `id` for delete); relationship steps take `source_record_type`/`source_id`/`target_record_type`/`target_id` (+ `id` for delete). The agent never sees the preconditions — they're injected server-side.
+- Cross-step references (linking to a record the *same* action just created by its server-assigned id) aren't supported yet — address each step with values you already hold (e.g. an `external_id` you set on the create step and reuse on a link step).
+
 ## Lenient list-tool arguments
 
 The generated `list` tools are lenient about how structured arguments arrive: `filter` is always a JSON-encoded Filter DSL string, while `sort` and any multi-value (`any_of`) parameter accept **either** the native array **or** a JSON-encoded string of it — so an agent that serializes array arguments as strings still works. (`sort` is the same JSON array of `{"field","direction"}` terms described in the Records section of SKILL.md.)

@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.40.0
+version: 1.41.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining the first
@@ -602,7 +602,7 @@ rekor toolsets get invoicing-agent --base my-ws --resolved
 rekor toolsets delete invoicing-agent --base my-ws
 ```
 
-**Action reference format**: `--action <action_id>` (or `<action_id>=<surface_name>` to rename it in this toolset). Author the Action first with `rekor actions upsert <id> --record_type X --operation Y` — one record_type + one operation, its `id` is the agent-facing tool name.
+**Action reference format**: `--action <action_id>` (or `<action_id>=<surface_name>` to rename it in this toolset). Author the Action first with `rekor actions upsert <id> --record_type X --operation Y` — one record_type + one operation, its `id` is the agent-facing tool name. An Action can also be a **composite** — `rekor actions upsert <id> --config '{ "steps": [...] }'` bundles several native writes (record create/update/delete + relationship create/delete) into one atomic tool with per-step guards (see `references/mcp-factory.md` → Composite Actions).
 **Relationship spec format**: `rel_type:op1,op2` (operations: `create`, `list`, `delete`)
 **Batch spec format**: `record_type_or_rel:op1,op2`
 
