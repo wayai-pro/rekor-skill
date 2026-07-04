@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.44.0
+version: 1.45.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining the first
@@ -348,13 +348,15 @@ rekor file-types delete <id> --base <ws>
 Work with files:
 
 ```
-rekor files put <file_type> <path> --base <ws> --file <local> [--content-type <mime>] [--metadata <json|@file>] [--if-match <sha256>]
-rekor files get <file_type> <path> --base <ws> [--output <local>] [--meta]
+rekor files put <file_type> <path> --base <ws> --file <local> [--content-type <mime>] [--metadata <json|@file>] [--label <tag>] [--if-match <sha256>]
+rekor files get <file_type> <path> --base <ws> [--output <local>] [--meta] [--version <n>]
 rekor files list <file_type> --base <ws> [--prefix <path>] [--depth <n>]
 rekor files mv <file_type> <from> <to> --base <ws>
 rekor files rm <file_type> <path> --base <ws>
 rekor files mount <file_type> --base <ws> [--mode <read_only|read_write>] [--path <prefix>] [--expires-in <seconds>]
 ```
+
+**File content versions.** Every content change to a file is retained as an immutable version. Tag a version with `--label` (e.g. `--label "proposal 1"`) on `put`, and read any earlier one with `rekor files get --version <n>` (reads return the latest by default). Renaming or re-tagging a file — metadata only, no new bytes — does not create a new version.
 
 **Mounting a file type as a filesystem.** `rekor files mount <file_type>` mints an S3-compatible credential so any harness or tool that speaks S3 (s3fs, cloud storage mount SDKs) can mount the bucket as a local folder and read files with ordinary filesystem calls — no per-tool integration. It prints an endpoint, bucket name, and access keys (the secret is shown **once**); point your S3 client at them with path-style addressing. Confine a credential to a sub-tree with `--path <prefix>` (repeatable), and set its access with `--mode read_only` (default) or `--mode read_write`; minting a write credential requires write access to files. A `read_write` mount can also **write files back** — writes are conflict-safe and versioned: each change is checked against the version you started from (a create requires the path be new; an update requires the file be unchanged since you read it), so a stale overwrite is refused rather than silently clobbering a concurrent change. Every write is a new version with full history. (`read_only` mounts read only; write elsewhere via `rekor files put` or the API.)
 
