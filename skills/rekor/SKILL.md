@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.38.0
+version: 1.39.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining the first
@@ -332,6 +332,31 @@ rekor attachments delete <record_type> <id> <attachment-id> --base <ws>
 
 `upload` with `--file` uploads the local file directly; without `--file`, `upload` returns a presigned URL you `PUT` the bytes to. `url` returns a **download** URL for fetching an existing attachment. `--prefix` filters `list` to a path prefix (e.g. `docs/`).
 
+### Files
+
+First-class, versioned, **path-addressed files** — the richer evolution of attachments. Store PDFs, images, generated reports, or any large/binary content as a **File** inside a **file type** (a "bucket" that configures storage policy — max size, allowed content-types — and an optional metadata schema). A file is addressed by a mutable `path`; renaming moves only the address, never the bytes. Files support **compare-and-set** (upload only if the current content hash matches, via `--if-match`), structured metadata, and linking to records.
+
+Configure file types (in a preview base, then promote):
+
+```
+rekor file-types upsert <id> --base <ws> --name <name> [--max-size <bytes>] [--allowed-content-types <json|@file>] [--metadata-schema <json|@file>]
+rekor file-types list --base <ws>
+rekor file-types get <id> --base <ws>
+rekor file-types delete <id> --base <ws>
+```
+
+Work with files:
+
+```
+rekor files put <file_type> <path> --base <ws> --file <local> [--content-type <mime>] [--metadata <json|@file>] [--if-match <sha256>]
+rekor files get <file_type> <path> --base <ws> [--output <local>] [--meta]
+rekor files list <file_type> --base <ws> [--prefix <path>] [--depth <n>]
+rekor files mv <file_type> <from> <to> --base <ws>
+rekor files rm <file_type> <path> --base <ws>
+```
+
+**Linking files to records.** A relationship can point at a file (its endpoint kind is `file`). List a record's linked files with `GET /v1/{base}/records/{record_type}/{id}/related-files`. To create a file and link it to a record in one step, `POST /v1/{base}/records/{record_type}/{id}/attach` (body = the file bytes; `file_type`, `rel_type`, `path` as query params). If the link's relationship type is declared **`cascade`**, deleting the link (or the owning relationship) removes the file; a non-cascade link is a plain reference, so a file shared across records survives. Production agents manage files with the `manage_file` MCP tool (create text content / get metadata / list / move / delete) and file types with `manage_file_type`.
+
 ### SQL Query
 
 Execute read-only SQL queries directly against base data. Supports filtering, aggregation, JOINs, CTEs, and array operations.
@@ -618,7 +643,7 @@ rekor tokens list
 rekor tokens revoke <token_id>
 ```
 
-**Permissions**: `read:records`, `write:records`, `read:record_types`, `write:record_types`, `read:relationships`, `write:relationships`, `read:attachments`, `write:attachments`, `read:inbound_webhooks`, `write:inbound_webhooks`, `read:triggers`, `write:triggers`, `read:toolsets`, `write:toolsets`, `read:bases`, `write:bases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), or `*` for all.
+**Permissions**: `read:records`, `write:records`, `read:record_types`, `write:record_types`, `read:relationships`, `write:relationships`, `read:attachments`, `write:attachments`, `read:files`, `write:files`, `read:file_types`, `write:file_types`, `read:inbound_webhooks`, `write:inbound_webhooks`, `read:triggers`, `write:triggers`, `read:toolsets`, `write:toolsets`, `read:bases`, `write:bases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), or `*` for all.
 
 **Scope fields**: `bases` (required), `record_types` (optional — omit for all), `environments` (optional — `production`, `preview`, or omit for both).
 
