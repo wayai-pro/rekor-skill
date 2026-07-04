@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.42.0
+version: 1.43.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining the first
@@ -353,10 +353,10 @@ rekor files get <file_type> <path> --base <ws> [--output <local>] [--meta]
 rekor files list <file_type> --base <ws> [--prefix <path>] [--depth <n>]
 rekor files mv <file_type> <from> <to> --base <ws>
 rekor files rm <file_type> <path> --base <ws>
-rekor files mount <file_type> --base <ws> [--expires-in <seconds>]
+rekor files mount <file_type> --base <ws> [--mode <read_only|read_write>] [--path <prefix>] [--expires-in <seconds>]
 ```
 
-**Mounting a file type as a filesystem.** `rekor files mount <file_type>` mints a read-only, S3-compatible credential so any harness or tool that speaks S3 (s3fs, cloud storage mount SDKs) can mount the bucket as a local folder and read files with ordinary filesystem calls — no per-tool integration. It prints an endpoint, bucket name, and access keys (the secret is shown **once**); point your S3 client at them with path-style addressing. Mounts are **read-only** — write new versions through `rekor files put` or the API, so every change stays versioned and governed.
+**Mounting a file type as a filesystem.** `rekor files mount <file_type>` mints an S3-compatible credential so any harness or tool that speaks S3 (s3fs, cloud storage mount SDKs) can mount the bucket as a local folder and read files with ordinary filesystem calls — no per-tool integration. It prints an endpoint, bucket name, and access keys (the secret is shown **once**); point your S3 client at them with path-style addressing. Confine a credential to a sub-tree with `--path <prefix>` (repeatable), and set its access with `--mode read_only` (default) or `--mode read_write`; minting a write credential requires write access to files. Mounts read files directly; write new versions through `rekor files put` or the API, so every change stays versioned and governed.
 
 **Linking files to records.** A relationship can point at a file (its endpoint kind is `file`). List a record's linked files with `GET /v1/{base}/records/{record_type}/{id}/related-files`. To create a file and link it to a record in one step, `POST /v1/{base}/records/{record_type}/{id}/attach` (body = the file bytes; `file_type`, `rel_type`, `path` as query params). If the link's relationship type is declared **`cascade`**, deleting the link (or the owning relationship) removes the file; a non-cascade link is a plain reference, so a file shared across records survives. Production agents manage files with the `manage_file` MCP tool (create text content / get metadata / list / move / delete) and file types with `manage_file_type`.
 
