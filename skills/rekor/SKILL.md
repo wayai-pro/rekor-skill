@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.47.1
+version: 1.47.2
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining the first
@@ -650,7 +650,7 @@ rekor tokens list
 rekor tokens revoke <token_id>
 ```
 
-**Permissions**: `read:records`, `write:records`, `read:record_types`, `write:record_types`, `read:relationships`, `write:relationships`, `read:attachments`, `write:attachments`, `read:files`, `write:files`, `read:file_types`, `write:file_types`, `read:inbound_webhooks`, `write:inbound_webhooks`, `read:triggers`, `write:triggers`, `read:toolsets`, `write:toolsets`, `read:bases`, `write:bases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), or `*` for all.
+**Permissions**: `read:records`, `write:records`, `read:record_types`, `write:record_types`, `read:relationships`, `write:relationships`, `read:relationship_types`, `write:relationship_types`, `read:attachments`, `write:attachments`, `read:files`, `write:files`, `read:file_types`, `write:file_types`, `read:inbound_webhooks`, `write:inbound_webhooks`, `read:triggers`, `write:triggers`, `read:toolsets`, `write:toolsets`, `read:actions`, `write:actions`, `read:bases`, `write:bases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), or `*` for all.
 
 **Scope fields**: `bases` (required), `record_types` (optional — omit for all), `environments` (optional — `production`, `preview`, or omit for both).
 
