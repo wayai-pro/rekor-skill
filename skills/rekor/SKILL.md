@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.47.2
+version: 1.48.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining the first
@@ -228,7 +228,7 @@ Tags let you group bases (e.g., `client:acme,billing`). Filter with `--tag`. Pro
 
 ### Config as Code (pull / push)
 
-Manage a base's whole config — record_types, relationship types, inbound webhooks, triggers, MCP toolsets — as version-controlled YAML files instead of one-off commands. Files live under `rekor-ws/bases/<db>/`, one file per entity, so changes review cleanly in a pull request.
+Manage a base's whole config — record_types, relationship types, inbound webhooks, triggers, MCP toolsets, seed fixtures — as version-controlled YAML files instead of one-off commands. Files live under `rekor-ws/bases/<db>/`, one file per entity, so changes review cleanly in a pull request.
 
 ```bash
 rekor pull <preview>                 # write the preview's config + a read-only mirror of linked production
@@ -571,6 +571,45 @@ Operation types: `upsert_record`, `delete_record`, `upsert_relationship`, `delet
 
 **Reading results**: the default (table) output prints a one-line summary per operation (index, type, resulting id). Add `--output json` for the full per-operation payload — the complete record/relationship of every write. Because the batch is atomic, a single failing operation rolls the **whole** batch back and the command exits non-zero with `Operation <N> failed: <reason>` naming the offending index — no partial writes land.
 
+### Seed Fixtures (hermetic eval data)
+
+A **fixture** is a named, reversible set of records (and relationships) you apply to a **preview** base to give agent evals a clean, re-runnable starting state. Author it as config-as-code and drive it by name — so an eval harness (even a headless/cloud one, using a scoped token) can reset the data around each run without a dirty base carrying over.
+
+Author the fixture as a file under the base's config folder, then push it with the base:
+
+```yaml
+# rekor-ws/bases/<preview-base>/seeds/demo.yaml
+id: demo
+description: Overdue-bills demo baseline
+records:                       # author FK targets BEFORE the records that reference them
+  - record_type: customers
+    external_id: cust-1
+    data: { name: Ada }
+  - record_type: bills
+    external_id: bill-1
+    data: { customer_id: cust-1, status: overdue, amount: 120 }
+relationships:                 # endpoints reference records by external_id
+  - rel_type: owes
+    source: { record_type: customers, external_id: cust-1 }
+    target: { record_type: bills, external_id: bill-1 }
+```
+
+```bash
+rekor push                       # store the fixture on the preview (pushes with the rest of the config)
+rekor seed apply demo --base <preview>   # write the fixture's records/relationships
+rekor seed reset demo --base <preview>   # restore the declared baseline (fixes records a run mutated)
+rekor seed clear demo --base <preview>   # delete every row the fixture owns (teardown)
+rekor seed list --base <preview>         # show the fixtures defined on the base
+```
+
+Rules and guarantees:
+- **Idempotent by `external_id`.** `apply` upserts each record by its `external_id`, so re-applying **updates in place and never creates a duplicate** — no twin records, even if a record already existed.
+- **`reset` restores the baseline.** It re-applies the declared records in place (fixing any a run mutated — e.g. a status a trigger flipped) and removes fixture-owned rows the fixture no longer declares. Use `reset` between eval runs for a guaranteed-clean start.
+- **`clear` is teardown.** It deletes exactly the rows the fixture owns, and nothing else — a fixture records ownership via a **reserved ownership marker** (never `external_source`), so teardown can never touch non-seed data.
+- **Preview-only.** `apply`/`reset`/`clear` run only on a preview base (like schema changes); they refuse production. The fixture definition promotes with the base like any other config, but the data ops stay preview-scoped.
+- **No trigger side-effects.** Applying/resetting a fixture is baseline setup — it does **not** fire triggers, so restoring data can't cascade.
+- **API-addressable.** The three verbs are reachable over the REST API by fixture name, so a cloud eval harness holding a token scoped to `write:seeds` on the one preview base can reset the data itself.
+
 ### Provider Adapters
 
 Import tool definitions from any LLM provider as record_types (`rekor providers import <provider>`), export record_types as tool definitions (`rekor providers export <provider>`), or turn a provider-native tool call into a record (`rekor providers import-call`). Supported providers: `openai`, `anthropic`, `google`, `mcp`. Command forms and payload shapes in **`references/providers.md`**.
@@ -650,7 +689,7 @@ rekor tokens list
 rekor tokens revoke <token_id>
 ```
 
-**Permissions**: `read:records`, `write:records`, `read:record_types`, `write:record_types`, `read:relationships`, `write:relationships`, `read:relationship_types`, `write:relationship_types`, `read:attachments`, `write:attachments`, `read:files`, `write:files`, `read:file_types`, `write:file_types`, `read:inbound_webhooks`, `write:inbound_webhooks`, `read:triggers`, `write:triggers`, `read:toolsets`, `write:toolsets`, `read:actions`, `write:actions`, `read:bases`, `write:bases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), or `*` for all.
+**Permissions**: `read:records`, `write:records`, `read:record_types`, `write:record_types`, `read:relationships`, `write:relationships`, `read:relationship_types`, `write:relationship_types`, `read:attachments`, `write:attachments`, `read:files`, `write:files`, `read:file_types`, `write:file_types`, `read:inbound_webhooks`, `write:inbound_webhooks`, `read:triggers`, `write:triggers`, `read:toolsets`, `write:toolsets`, `read:actions`, `write:actions`, `read:seeds`, `write:seeds`, `read:bases`, `write:bases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), or `*` for all.
 
 **Scope fields**: `bases` (required), `record_types` (optional — omit for all), `environments` (optional — `production`, `preview`, or omit for both).
 
