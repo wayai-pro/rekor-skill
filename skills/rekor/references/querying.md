@@ -12,6 +12,8 @@ Deep how-to for reading records: the SQL example gallery, `search`-field tuning 
 
 All queries must include BOTH `org_id = {org_id:String}` AND `base_id = {base_id:String}`, plus `deleted = false` (and `archived = false` for active-only). Access JSON fields with `data.field.:Type` subcolumn syntax, or `CAST(data.field, 'Type')` for type-safe conversion.
 
+Note the contrast with Filter-DSL list queries (`rekor records list` / `rekor relationships list` / the query tools): those return **active records by default**, and an explicit filter condition on `archived` overrides the default (your predicate decides which tier you see). Raw SQL applies no such default — you state the tiers yourself, and it's also the only way to read archived rows through record traversal (`related`), which has no filter override.
+
 ```bash
 # Simple query
 rekor sql "SELECT data.invoice_number.:String as num, data.status.:String as status FROM records WHERE org_id = {org_id:String} AND base_id = {base_id:String} AND record_type = 'invoices' AND deleted = false" --base my-ws
