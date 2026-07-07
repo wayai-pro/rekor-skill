@@ -24,6 +24,6 @@ Set up Rekor as the data layer for my customer support agent.
 
 ## 3. Don't have an account yet?
 
-Free plan includes 2,000 operations per month. No credit card required.
+Free plan includes 1,000 operations per month. No credit card required.
 
 [Create a free account](https://rekor.pro)

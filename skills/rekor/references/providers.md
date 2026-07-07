@@ -11,6 +11,9 @@ rekor providers import openai --base <ws> --tools '[{"type":"function","function
 # Anthropic
 rekor providers import anthropic --base <ws> --tools '[{"name":"create_invoice","input_schema":{"type":"object","properties":{"customer":{"type":"string"}}}}]'
 
+# Google (Gemini function declaration)
+rekor providers import google --base <ws> --tools '[{"name":"create_invoice","parameters":{"type":"object","properties":{"customer":{"type":"string"}}}}]'
+
 # MCP
 rekor providers import mcp --base <ws> --tools '[{"name":"create_invoice","inputSchema":{"type":"object","properties":{"customer":{"type":"string"}}}}]'
 
@@ -37,4 +40,8 @@ rekor providers import-call openai invoices --base <ws> \
 # Anthropic tool call → record
 rekor providers import-call anthropic invoices --base <ws> \
   --data '{"input":{"customer":"Acme","amount":5000}}'
+
+# Google tool call → record
+rekor providers import-call google invoices --base <ws> \
+  --data '{"args":{"customer":"Acme","amount":5000}}'
 ```

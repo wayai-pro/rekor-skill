@@ -1,32 +1,144 @@
 ---
 name: rekor
-version: 1.48.0
+version: 1.49.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
-  installing the `rekor` CLI, authenticating, creating a base, defining the first
-  record_type, working in preview and promoting to production, querying records via SQL,
-  managing relationships, uploading file attachments, configuring inbound webhooks/triggers/batch
-  operations, backing a record_type with an external API (external sources), storing
-  credentials in the secret vault, importing or exporting tool definitions across
-  providers (OpenAI/Anthropic/Google/MCP), creating curated MCP Factory toolsets,
-  scoping API tokens, modeling record_types and MCP toolsets so LLM agents use them
-  reliably, or interpreting Rekor concepts (base, record_type, record,
-  relationship, preview/production, external_id).
+  installing the `rekor` CLI, authenticating, creating a base, defining record_types,
+  working in preview and promoting to production, managing config as code (rekor
+  pull/push), pulling ready-made templates, upserting or querying records (Filter DSL
+  or SQL), managing relationships, storing versioned files or attachments (incl. S3
+  mounts), configuring inbound webhooks, triggers, batch operations, or seed fixtures
+  for agent evals, backing a record_type with an external API (external sources,
+  executors), storing credentials in the secret vault, importing or exporting tool
+  definitions across providers (OpenAI/Anthropic/Google/MCP), creating curated MCP
+  Factory toolsets and Actions, scoping API tokens, modeling record_types and toolsets
+  so LLM agents use them reliably, or interpreting any Rekor concept (base,
+  record_type, record, relationship, preview/production, promotion, external_id).
 ---
 
 # Rekor — Data Layer for AI Agents
 
 You have access to the `rekor` CLI — the builder interface for Rekor. Use it to set up schemas, configure record_types, test in preview environments, and promote to production. Production agents use MCP tools to read/write records; external systems integrate via REST API. The CLI is your tool for designing and managing the data model.
 
+This file is self-contained on concepts: **The Rekor Object Model** defines every primitive, the **Task → Feature Map** routes any request to the section that implements it, and **Where to Find More Detail** says when to open the bundled `references/` files for full option grammar.
+
 ## Agent Guidelines
 
 - Drive Rekor through the **`rekor` CLI** when you have shell access. If you also have `mcp__rekor__*` tools in your toolset, prefer the CLI for setup and configuration; reserve MCP tools for production read/write operations.
 - Only provide information from this skill, tool descriptions, or reference documentation. Do not invent URLs, paths, commands, or flags.
+- **Read the matching `references/*.md` file before configuring its feature.** This file deliberately carries the concepts and common command shapes only; the full option grammar for querying/search tuning, external sources, MCP Factory Actions/toolsets, executors, and provider adapters lives in the bundled reference files (index in **Where to Find More Detail**).
 - Schema work (record_types, inbound webhooks, triggers, MCP Factory toolsets) only happens in **preview** bases. Always create or use a preview before changing schemas.
 - **Identifiers are permanent.** The `id` of a base, record_type, relationship type, Action, and MCP Factory toolset *is* its identity and is **immutable** — chosen once at creation and never renamed. Display names and descriptions stay editable, but never the `id` (a relationship type has no separate name — its `id` is also its label). There is no rename: to "rename" one of these you create a new entity and migrate its data (the old one is left untouched). So choose clear, stable, lowercase-slug ids up front (e.g. `patients`, `treated_by`).
 - **Promotion is human-only.** When schema is ready, surface the exact `rekor bases promote` command and wait for the user to run it.
 - Tokens are shown only **once on creation**. Always tell the user to copy and store it before doing anything else.
 - Never auto-commit. Show the user `git diff` (when working with schema files) and wait for approval.
+
+---
+
+## The Rekor Object Model
+
+Read this once — it is the complete concept set. Every setup task is a combination of these pieces; the **Full Command Reference** below gives the commands and rules, and the bundled `references/` files the deep grammar.
+
+```
+Organization                      ← account boundary; members, API tokens, vault secrets
+└── Base (production | preview)   ← top-level data container: one per app, domain, or tenant
+    ├── CONFIG — edit in PREVIEW, ship with PROMOTE (human-run):
+    │     record types (+ their external sources) · relationship types · file types
+    │     · triggers · inbound webhooks · Actions · toolsets · seed fixture definitions
+    └── DATA — read/write on ANY base, production included:
+          records · relationships · files · attachments · batch writes
+          (one exception: seed apply/reset/clear run only on previews)
+```
+
+**The one rule that routes every command:** config writes are rejected on a production base — make them in a **preview** (`rekor bases create-preview`), then have the user run `rekor bases promote`. Data writes work anywhere. If a write unexpectedly fails with a preview/403 error, you attempted a config write on production.
+
+### Every primitive, one line each
+
+Two schema→instance pairs anchor the model: **record type → record** and **relationship type → relationship**. Files repeat the pattern (**file type → file**).
+
+| Primitive | What it is | Commands / section |
+|---|---|---|
+| **Organization** | Account boundary owning bases, tokens, and secrets; bound to the repo by `rekor init` (override with `--org` / `REKOR_ORG`) | `rekor init` |
+| **Base** | Top-level data container. `production` (its config entities change only via promote; metadata like name/tags/timezone stays editable) or `preview` (`<prod>--<slug>`, a config-editable clone that promotes back to its origin) | `rekor bases` |
+| **Record type** | JSON Schema defining a record type — created at runtime, no migrations. Carries schema hints (`x-fk` foreign keys, `x-search` tuning, `x-archival` mode, `x-timezone`, `x-ui` display) and optionally declares **external sources** | `rekor record-types` |
+| **Record** | JSON row conforming to its record type. System-generated `id` plus your `external_id`/`external_source` for **idempotent upsert** (re-upsert updates in place). Can be **cancelled** (first-class state) or **archived** (terminal/inactive) | `rekor records` |
+| **Relationship type** | Config defining a `rel_type` (its id IS the type) with an optional metadata schema and source/target record-type allowlists. Must exist before any relationship of that type | `rekor relationship-types` |
+| **Relationship** | Typed, directed link between two records (an endpoint can also be a file), with validated metadata; traversable in both directions | `rekor relationships`, `rekor query-relationships` |
+| **Filter DSL** | The one condition language — `{field, op, value}` + `and`/`or` groups — used by `records query`, trigger `--filter`, and Action `precondition` | Records → Filtering & search |
+| **File type** | Bucket config for files: max size, allowed content types, optional metadata schema | `rekor file-types` |
+| **File** | Versioned, path-addressed content (PDFs, images, documents). Compare-and-set writes, per-version history and diff, S3-mountable | `rekor files` |
+| **Attachment** | Simple record-scoped upload — Files are the richer, versioned evolution | `rekor attachments` |
+| **External source** | Declared **on a record type**: backs its CRUD operations with an external API through one bidirectional `field_mapping` contract | External Sources |
+| **Trigger** | Fires on record/relationship/file events. Its action: signed **webhook** out, **internal_write** (guarded patch to a related record), or **external_write** (push the change upstream through a source) | `rekor triggers` |
+| **Inbound webhook** | Signed ingest URL an external system pushes to — payload stored raw, translated via a mapping, or **hydrated** (thin "id changed" notification → Rekor fetches the full record through a bound source) | `rekor inbound-webhooks` |
+| **Executor** | A small HTTP service **you** deploy for what Rekor can't call directly (custom logic, mTLS, SOAP, binary creds); receives signed dispatches, verified with `rekor-sdk` | Executors |
+| **Signing v1** | The HMAC request signature on trigger deliveries, executor-bound source calls (opt-in `signing`), and inbound-webhook verification (the default scheme) — one wire format, both directions; `rekor-sdk` implements it, never hand-roll | Executors, Inbound Webhooks |
+| **Action** | One record type + one operation, shaped and guarded (`filterable_fields`, `writable_fields`, `precondition`, `binding`) — or a **composite** of atomic multi-record steps. Its id is the agent-facing tool name | `rekor actions` |
+| **Toolset** | A curated MCP server composed of Action references (plus relationship/batch/SQL tools), served at `mcp.rekor.pro/t/<slug>/mcp` | `rekor toolsets` |
+| **Seed fixture** | Named, reversible records+relationships baseline for hermetic agent evals. The definition is config; `apply`/`reset`/`clear` are preview-only data operations | `rekor seed` |
+| **API token** | `rec_…` credential: grant-scoped (bases × record_types × environments × permissions) or **toolset-bound** (its authorization IS one toolset's tool surface) | `rekor tokens` |
+| **Secret** | Org-level encrypted credential (string or file blob), referenced from source/trigger config as `vault:<name>`, pullable by executors at dispatch | `rekor secrets` |
+| **Template** | Ready-made config-as-code data layer (record types, relationship types, Actions, toolsets) you `pull`, `push`, and promote | `rekor template` |
+
+**Identity rules.** Config slugs are permanent ids (see **Agent Guidelines**). Always set `external_id` on records that have a natural key — retries and re-imports then upsert instead of duplicating. Every record write is validated against its record type schema (plus `x-fk` reference checks and datetime canonicalization).
+
+**Integration edges.** One `field_mapping` contract on a source is reused by every edge — proxied reads/writes, `external_write` out, inbound-webhook mapping/hydration in. Model entities canonically first, then pick edges per operation: the **Integration Modeling** section is the decision guide and pattern catalog.
+
+**Consistency & limits.** Single-record `get`s reflect writes immediately; `sql`, `records query`, `query-relationships`, and `search` may lag a write by a moment. Record/relationship JSON is capped at ~1 MiB — large or binary content belongs in Files.
+
+## Task → Feature Map
+
+Route any request to the right feature, then jump to that section of the command reference.
+
+| You need to… | Use | Section |
+|---|---|---|
+| Store & validate structured business data | record type schema + records | RecordTypes, Records |
+| Change one field without resending the record | partial update (REST `PATCH` / MCP `patch`) | Records |
+| Prevent duplicates on retries and re-imports | upsert by `--external-id` | Records |
+| Link entities; traverse a graph | relationship type + relationships | Relationship Types, Relationships |
+| Make a reference resolve to a real record | `x-fk` on the schema field | Records → Referential integrity |
+| Find by approximate name/text | Filter DSL `search` operator | Records → Filtering & search |
+| Reports, aggregations, joins | `rekor sql` | SQL Query |
+| Store PDFs / images / versioned documents | file type + files; mount over S3 | Files |
+| Several writes, all-or-nothing | `rekor batch` | Batch |
+| Notify an external system on data change | trigger → webhook | Triggers |
+| "When A changes, update related B" | trigger → `internal_write` (async or transactional) | Triggers |
+| Mirror native records out to an upstream API | trigger → `external_write` reusing a source | Triggers, External Sources |
+| Accept full-payload pushes from outside | inbound webhook (+ optional field mapping) | Inbound Webhooks |
+| Turn "record X changed" pings into full records | hydrating inbound webhook (+ `merge` to keep your fields) | Inbound Webhooks |
+| Read/write an external API as if it were native | external sources on the record type | External Sources |
+| Integrate something Rekor can't call directly | executor + `rekor-sdk` | Executors |
+| Give an LLM agent safe, domain-named tools | Actions + toolset + toolset-bound token | MCP Factory |
+| Make a state-dependent write race-free | Action `precondition` (compare-and-set) | MCP Factory |
+| One agent tool = several writes, atomic | composite Action | MCP Factory |
+| Least-privilege machine/CI access | scoped tokens (`create-for-toolset` for agents) | API Tokens |
+| Store integration credentials | secret vault (`vault:<name>` references) | Secrets |
+| Manage config in git / review in PRs | `rekor pull` / `rekor push` | Config as Code |
+| Stand up a proven data layer in minutes | `rekor template pull` | Templates |
+| Deterministic agent evals, no live upstream | preview with `--integrations disabled` + seed fixtures | Bases, Seed Fixtures |
+| Import/export provider tool definitions | provider adapters | Provider Adapters |
+| See who changed what, and when | `history` subcommands (admin-gated) | Records |
+| Decide native vs proxy vs mirror backing | the pattern catalog | Integration Modeling |
+| Shape schemas/tools so agents succeed | principles + recipes | Modeling Principles |
+
+## Where to Find More Detail
+
+The bundled `references/` files carry the full option grammar — read the matching one **before configuring** that feature.
+
+| Reference file | Read when | Contents |
+|---|---|---|
+| `references/querying.md` | Writing non-trivial SQL, tuning `search`, setting timezones | SQL example gallery (arrays, `ARRAY JOIN`, CTEs, `--param`, fuzzy ranking), `x-search` modes/threshold, datetime & timezone configuration |
+| `references/external-sources.md` | Configuring any external source | Full source grammar: `field_mapping` rules (value maps, transforms, split/destructure/computed, per-op overrides), per-op endpoints, named write bindings, `id_path` variants, `forward_filters`, body shaping, `{{current.*}}`/`{{prior.*}}`, caching/signing/timeout/breaker, SSRF rules, a worked legacy-upstream example |
+| `references/mcp-factory.md` | Authoring Actions or toolsets beyond the defaults | Full Action + toolset grammar: `filterable_fields`, `expose_*`/`default_*`/`agent_minimal`, `writable_fields`, `precondition`, `binding`, composite Actions, tool naming, which base serves a toolset slug |
+| `references/executors.md` | Building or deploying an executor | The `rekor-sdk` contract (verify, dedupe, error envelope), signed write-back, where to host, the vault certificate pull pattern, local dev, retries |
+| `references/providers.md` | Importing/exporting provider tool definitions | Exact `rekor providers` command forms per provider (OpenAI/Anthropic/Google/MCP) |
+
+At runtime you can also consult:
+
+- `rekor <command> --help` (and `rekor <command> <subcommand> --help`) — the authoritative flag list for any command.
+- `rekor status` — auth, connectivity, active org, and worktree binding; `rekor whoami` — the authenticated identity.
+
+If a command, flag, or URL appears in none of these sources, assume it does not exist — never guess one.
 
 ---
 
@@ -132,16 +244,13 @@ The raw token (`rec_...`) is shown **once**. Copy it immediately.
 
 See the [MCP Factory](#mcp-factory-custom-toolsets) section below.
 
+Beyond the first record type — relationships, files, triggers, integrations, toolsets, evals — use the **Task → Feature Map** above to find the right feature. Once the config spans more than a couple of entities, prefer **Config as Code** (`rekor pull`/`push`) over one-off commands so changes are reviewable files.
+
 ---
 
-## Core Concepts
-
-- **RecordType**: A schema (JSON Schema) that defines a record type. No migrations — create at runtime.
-- **Record**: A JSON record conforming to a record_type's schema.
-- **Relationship type**: A schema (like a record_type, but for links) that defines a `rel_type`. It optionally validates a relationship's metadata against a JSON Schema and optionally restricts which record_types it may connect. Must exist before any relationship of that type can be created.
-- **Relationship**: A typed, directed link between two records. Its `rel_type` must be a declared relationship type; its metadata is validated against that type's schema.
-
 ## Quick Start
+
+The core schema→instance pairs in action. `--base my-ws` is a placeholder — for the config writes below (`record-types upsert`, `relationship-types upsert`) it must name a **preview** base.
 
 ### 1. Create a record_type
 
@@ -247,7 +356,7 @@ rekor unbind                         # clear this worktree's base binding
 
 ### Templates
 
-Ready-made data layers you can pull and stand up in minutes — each bundles a base's record_types, relationship types, and a custom toolset for an AI agent.
+Ready-made data layers you can pull and stand up in minutes — each bundles a base's record_types, relationship types, Actions, and curated toolsets for an AI agent.
 
 ```bash
 rekor template list                                       # browse available templates
@@ -255,7 +364,7 @@ rekor template pull <slug> [--lang en|pt|es] [--dry-run]  # write a template's d
 rekor template pull <slug> --force                        # overwrite existing files in the target folder
 ```
 
-- **`pull` seeds a config-as-code folder.** It writes the template's record_types, relationship types, and MCP toolset into `rekor-ws/bases/<slug>/` (id defaults to the slug; override with `--base <id>`), pre-wired with an `origin_base_id` so the normal flow stands it up: `rekor bases create <id> --name "…"`, then `rekor push <id>`, then `rekor bases promote <id> --from <preview>`. Once promoted, the template's MCP toolset is live for your agents.
+- **`pull` seeds a config-as-code folder.** It writes the template's record_types, relationship types, Actions, and MCP toolsets into `rekor-ws/bases/<slug>/` (id defaults to the slug; override with `--base <id>`), pre-wired with an `origin_base_id` so the normal flow stands it up: `rekor bases create <id> --name "…"`, then `rekor push <id>`, then `rekor bases promote <id> --from <preview>`. Once promoted, the template's MCP toolsets are live for your agents.
 - **`pull` won't overwrite your edits.** If the target folder already has files the template would write, `pull` refuses and lists them (your other files are left untouched) — pass `--force` to overwrite, `--base <new-id>` to write elsewhere, or `--dry-run` to preview the file set first.
 - **`--lang`** selects a localized variant; an untranslated language falls back to the default (with a note).
 
@@ -321,7 +430,7 @@ Every field is searchable by default — `search` needs no setup. Exact filters 
 
 ### Attachments
 
-Store large or binary content (PDFs, images, files) as attachments on a record and reference them from the record data — record/relationship JSON is for structured data and is capped at ~1 MiB, so inlining base64 blobs is rejected. Filenames may contain paths for folder structure (e.g. `docs/guide.md`).
+Store large or binary content (PDFs, images, files) as attachments on a record and reference them from the record data — record/relationship JSON is for structured data and is capped at ~1 MiB, so inlining base64 blobs is rejected. Filenames may contain paths for folder structure (e.g. `docs/guide.md`). For versioning, metadata schemas, compare-and-set, or S3 mounting, prefer **Files** (below) — the richer evolution of attachments.
 
 ```bash
 rekor attachments upload <record_type> <id> --base <ws> --filename <name> [--content-type <mime>] [--file <path>]
@@ -719,8 +828,9 @@ Set `--expires-at` (ISO-8601) on credentials that lapse — yearly certificates,
 ### Account & Diagnostics
 
 ```bash
+rekor init                   # Bind this repo to an organization (writes .rekor.yaml — see First-Time Setup)
 rekor whoami                 # Show the authenticated identity
-rekor status                 # Auth, connectivity, and CLI version diagnostics
+rekor status                 # Auth, connectivity, active org, worktree binding, CLI version
 rekor update                 # Update the CLI to the latest published version
 ```
 
@@ -770,32 +880,19 @@ Any `--data`, `--schema`, `--tools`, or `--operations` flag accepts:
 
 ## Environments
 
-Bases are either **production** or **preview**. As an agent, you can:
-
-- **Read** from any base (production or preview)
-- **Write records and relationships** to any base
-- **Modify schemas** (record_types, triggers, inbound webhooks) only in preview bases
-
-To modify schemas, create a preview base first:
+The rule lives in **The Rekor Object Model**: config writes only in preview, data writes anywhere, promotion human-run. The worked shape:
 
 ```bash
+# 1. Create the preview
 rekor bases create-preview my-base --name "add-invoices"
-```
 
-Then work in the preview base:
-
-```bash
-rekor record-types upsert invoices --base my-base--add-invoices \
+# 2. Make config writes against it
+rekor record-types upsert invoices --base my-base--add-invoices --name "Invoices" \
   --schema '{"type":"object","properties":{"amount":{"type":"number"}}}'
-```
 
-When you're done, ask a human operator to promote your changes:
-
+# 3. Ask the user to run the promotion (human-only — you cannot promote):
+#    rekor bases promote my-base --from my-base--add-invoices
 ```
-# Human runs: rekor bases promote my-base --from my-base--add-invoices
-```
-
-**Promotion is a human-only operation.** You cannot promote directly. Always work in preview for schema changes.
 
 ## Modeling Principles for Agent Consumption
 
@@ -835,8 +932,8 @@ The principles above are agent-layer and backend-neutral; these are the specific
 - **Preview for schema changes** — modify record_types, triggers, inbound webhooks in a preview base. Ask a human to promote.
 - **Batch for atomicity** — when multiple writes must succeed or fail together.
 - **Relationships over nested data** — link records instead of embedding. Enables traversal and flexible queries.
-- **Attachments for large or binary content** — record data and relationship metadata are for structured JSON and are capped at ~1 MiB. Store PDFs, images, and other files as attachments (`rekor attachments upload <record_type> <id> --filename <name> --file <path>`) and reference them from the record; inlining base64 blobs is rejected.
+- **Files for large or binary content** — record data and relationship metadata are for structured JSON and are capped at ~1 MiB; inlining base64 blobs is rejected. Store PDFs, images, and other binary content as **Files** (`rekor files put <file_type> <path> --file <local>`) and link them to records — or as simple record-scoped attachments (`rekor attachments upload …`).
 - **Schema first** — define the record_type schema before writing records. Validation catches bad data early.
-- **Query delay after writes** — single-record reads (`records get`, `relationships get`) reflect writes immediately; `sql` and `query-relationships` may take a moment to catch up. If you need to query right after writing, wait briefly or use direct gets.
+- **Query delay after writes** — single-record reads (`records get`, `relationships get`) reflect writes immediately; `sql`, `records query`, `query-relationships`, and `search` may take a moment to catch up. If you need to query right after writing, wait briefly or use direct gets.
 - **Set token expiration** — use `--expires-at` for short-lived tokens. Revoke unused tokens promptly.
 - **Save tokens immediately** — the raw token is shown only once on creation. Store it securely before closing the terminal.
