@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.51.0
+version: 1.51.1
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -848,6 +848,8 @@ The CLI checks for newer published versions of both in the background and prints
 ### Reporting
 
 File a bug or issue to the Rekor team, then follow it through to a fix. Reports are deduplicated, so re-filing the same problem merges into the existing one rather than spamming.
+
+**If an update notice is showing** (see [Staying up to date](#staying-up-to-date)), update and re-check before filing — the bug may already be fixed in a newer CLI or skill.
 
 ```bash
 # File a report (deduplicated). --dedup-key collapses repeat occurrences of the same issue.
