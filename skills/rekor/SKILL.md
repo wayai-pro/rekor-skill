@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.52.1
+version: 1.53.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -781,6 +781,8 @@ Toolsets can only be created/modified in preview bases. Promote to production wh
 
 Create scoped tokens for agents, integrations, and CI/CD. Tokens can be restricted to specific bases, record_types, environments, and permissions. Tokens are hashed before storage — the raw value is shown only once on creation.
 
+**Mint probe/test/diagnostic tokens with `--ttl`** so they expire on their own — a disposable token never needs a manual revoke or cleanup. Use `--description` to record what holds a token (which service, credential, or pipeline), so future you knows what breaks if it's revoked.
+
 ```bash
 # Create a full-access token
 rekor tokens create --name "my-key" --grants '[{"scope":{"bases":["*"]},"permissions":["*"]}]'
@@ -789,17 +791,30 @@ rekor tokens create --name "my-key" --grants '[{"scope":{"bases":["*"]},"permiss
 rekor tokens create --name "client-a-reader" \
   --grants '[{"scope":{"bases":["client-a"],"environments":["production"]},"permissions":["read:records","read:record_types"]}]'
 
-# Create a token with expiration
+# Disposable probe token — auto-expires, no cleanup needed (--ttl takes s/m/h/d)
+rekor tokens create --name "probe" --ttl 10m \
+  --grants '[{"scope":{"bases":["*"]},"permissions":["*"]}]'
+
+# Absolute expiry + a note about who holds the token
 rekor tokens create --name "temp-key" \
   --grants '[{"scope":{"bases":["*"]},"permissions":["*"]}]' \
-  --expires-at 2026-12-31T23:59:59Z
+  --expires-at 2026-12-31T23:59:59Z \
+  --description "CI pipeline for repo X"
 
-# List tokens (shows status, last_used_at, expires_at)
+# List tokens (shows status, last_used_at, expires_at, description)
 rekor tokens list
 
-# Revoke a token
+# Revoke a token (permanent)
 rekor tokens revoke <token_id>
+
+# Clean up stale tokens — selects by staleness ONLY (expired, or unused past the
+# window), never by name. Previews first; revoking requires --yes.
+rekor tokens prune                        # expired tokens only
+rekor tokens prune --unused-since 30d     # + tokens with no activity for 30 days
+rekor tokens prune --unused-since 30d --yes
 ```
+
+**Revoke guardrail**: revoking a token that was used in the last 7 days or is toolset-bound (a consumer token — an MCP connection likely holds it) is refused with a warning; pass `--force` to override. Do NOT `--force` (or prune with `--include-bound`) unless a human has confirmed nothing depends on the token — revocation is permanent and breaks live traffic immediately. Expired tokens revoke without friction.
 
 **Permissions**: `read:records`, `write:records`, `read:record_types`, `write:record_types`, `read:relationships`, `write:relationships`, `read:relationship_types`, `write:relationship_types`, `read:attachments`, `write:attachments`, `read:files`, `write:files`, `read:file_types`, `write:file_types`, `read:inbound_webhooks`, `write:inbound_webhooks`, `read:triggers`, `write:triggers`, `read:toolsets`, `write:toolsets`, `read:actions`, `write:actions`, `read:seeds`, `write:seeds`, `read:bases`, `write:bases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), or `*` for all.
 
