@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.53.0
+version: 1.54.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -704,6 +704,7 @@ relationships:                 # endpoints reference records by external_id
   - rel_type: owes
     source: { record_type: customers, external_id: cust-1 }
     target: { record_type: bills, external_id: bill-1 }
+exclusive_record_types: [customers, bills]   # optional: reset also removes non-declared records of these types
 ```
 
 ```bash
@@ -717,6 +718,7 @@ rekor seed list --base <preview>         # show the fixtures defined on the base
 Rules and guarantees:
 - **Idempotent by `external_id`.** `apply` upserts each record by its `external_id`, so re-applying **updates in place and never creates a duplicate** — no twin records, even if a record already existed.
 - **`reset` restores the baseline.** It re-applies the declared records in place (fixing any a run mutated — e.g. a status a trigger flipped) and removes fixture-owned rows the fixture no longer declares. Use `reset` between eval runs for a guaranteed-clean start.
+- **`exclusive_record_types` makes `reset` authoritative for whole record types.** Records an agent *creates* during a run carry no ownership marker, so a plain reset leaves them behind and they accumulate across runs. List the record types your evals write to and `reset` also removes every record of those types the fixture didn't declare — regardless of who created it, including other fixtures' rows — plus any relationships pointing at the removed records. A record referenced by one of the fixture's declared relationships always survives, even if it isn't in `records`. Opt-in and reset-only (`apply`/`clear` are unchanged); a relationship an agent created between two *kept* baseline records still survives; a listed record type that doesn't exist on the base is a silent no-op at reset (existence is checked at promote). Choose exclusive types deliberately on a shared preview — the fixture becomes the single source of truth for them.
 - **`clear` is teardown.** It deletes exactly the rows the fixture owns, and nothing else — a fixture records ownership via a **reserved ownership marker** (never `external_source`), so teardown can never touch non-seed data.
 - **Preview-only.** `apply`/`reset`/`clear` run only on a preview base (like schema changes); they refuse production. The fixture definition promotes with the base like any other config, but the data ops stay preview-scoped.
 - **No trigger side-effects.** Applying/resetting a fixture is baseline setup — it does **not** fire triggers, so restoring data can't cascade.
