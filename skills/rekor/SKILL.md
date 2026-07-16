@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.54.0
+version: 1.54.1
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -84,7 +84,7 @@ Two schema→instance pairs anchor the model: **record type → record** and **r
 
 **Integration edges.** One `field_mapping` contract on a source is reused by every edge — proxied reads/writes, `external_write` out, inbound-webhook mapping/hydration in. Model entities canonically first, then pick edges per operation: the **Integration Modeling** section is the decision guide and pattern catalog.
 
-**Consistency & limits.** Single-record `get`s and eligible active-record `records query` / `query-relationships` lists reflect writes immediately; `sql`, `search`, and a few query shapes that read from recently-synced data (projected field lists, filters on the built-in `created_at`/`updated_at` timestamps without a timezone offset) may lag a write by a moment. Record/relationship JSON is capped at ~1 MiB — large or binary content belongs in Files.
+**Consistency & limits.** Single-record `get`s and eligible active-record `records query` / `query-relationships` lists reflect writes immediately; `sql`, `search`, and a few query shapes that read from recently-synced data (filters on the built-in `created_at`/`updated_at` timestamps without a timezone offset) may lag a write by a moment. Record/relationship JSON is capped at ~1 MiB — large or binary content belongs in Files.
 
 ## Task → Feature Map
 
@@ -397,7 +397,7 @@ rekor records history <id> --base <ws> [--limit <n>] [--offset <n>] [--diff]
 
 **Filtering & search.** `query` (REST `GET /records/<record_type>`, MCP `query_records`) takes a Filter DSL expression — a condition `{field, op, value}` or an `and`/`or` group of them. Operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`, `not_in`, `like`, `ilike`, `is_null`, `is_not_null`, `has`, and **`search`**. This DSL is the only accepted form — Mongo-style shorthand (`{"data.field":"value"}`, `{"field":{"$in":[...]}}`) is **not** supported.
 
-Listing and filtering active records (and relationships) is **read-after-write consistent** — a record you just wrote appears in the very next list, no lag. A few query shapes instead read from recently-synced data (so a just-written record may take a brief moment to appear): `search` queries (see below), requests for a projected subset of fields, and filters comparing the built-in `created_at`/`updated_at` timestamps to a value written without a timezone offset.
+Listing and filtering active records (and relationships) is **read-after-write consistent** — a record you just wrote appears in the very next list, no lag. A few query shapes instead read from recently-synced data (so a just-written record may take a brief moment to appear): `search` queries (see below) and filters comparing the built-in `created_at`/`updated_at` timestamps to a value written without a timezone offset. (Requesting a projected subset of fields does not by itself change this — projection is never what moves a query onto the recently-synced path.)
 
 `search` matches a field by **approximate** value — use it when you have a near-correct string but not the exact stored one (e.g. a model name, a place, a plan name, a SKU with a possible typo). Results come back **ranked by closeness**, each carrying a `_search_score` (0–1, higher = closer):
 
