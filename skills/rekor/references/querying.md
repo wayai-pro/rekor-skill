@@ -63,6 +63,10 @@ Every field is searchable by default — `search` needs no setup. Exact filters 
 
 Tuning is optional — unset fields use a sensible default. `x-search` hints apply to **top-level fields**; `search` still works on nested paths (e.g. `data.address.city`) using the default behavior, they just aren't individually tuned. Search runs against the latest synced data, so a record written a moment earlier may take a brief moment to appear.
 
+**Pick `threshold` deliberately.** Everything above the cutoff is returned, ranked — so a value that doesn't exist can still come back as a confident near-match of something else. `mode: "name"` compresses scores high when many values share a prefix token (hundreds of plans all starting `AMIL`), which is exactly when a default cutoff under-discriminates. If "no match" needs to be a trustworthy signal in your workload, raise `threshold` on that field.
+
+**Exposing search to an agent:** these hints only affect a toolset's generated tool if the `list` Action declares `match: search` on that field in `filterable_fields` — the only match that compiles to the `search` operator (`references/mcp-factory.md`). A `searchable: false` field is rejected there at config-write.
+
 Omit `--sort` when using `search` to keep the relevance ranking.
 
 ## Datetime configuration

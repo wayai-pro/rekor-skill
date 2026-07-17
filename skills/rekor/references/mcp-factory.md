@@ -96,7 +96,28 @@ Each field becomes a parameter shaped by its type:
 - a number or date/date-time field → a range pair (`<field>_min`/`<field>_max`, or `<field>_after`/`<field>_before`)
 - a string field → a `<field>_contains` substring param
 
-Per field you may set `param` (rename the generated param), `match` (`exact` | `range` | `text` | `any_of` | `member` — `any_of` accepts a list and matches any; `member` exposes an **array** field as a single membership value), an optional `enum` (constrain the param to a fixed set so the agent can only pick a valid value), an optional `pattern` (a regex declaring the valid format of a structured string field — e.g. an id or code shape like `^pat-[0-9]+$` — so a placeholder such as `"null"`/`"undefined"` or any wrong format is rejected with an actionable error instead of silently matching nothing; applies to an exact/any_of/member match on a plain string field, and cannot be combined with `enum`), and `description`. An array field auto-exposes as a `member` param; object fields are rejected — expose a nested path (`address.city`) instead. The generic `filter` parameter stays on the tool as the escape hatch for anything the typed params cannot express (OR / nesting); typed params and `filter` are combined with AND.
+**`param` is a stem, not always the final param name.** Some matches suffix it:
+
+| match | generated param(s) |
+|---|---|
+| `exact`, `any_of`, `member` | `<param>` (verbatim) |
+| `text` | `<param>_contains` |
+| `range` | `<param>_min` / `<param>_max` (`_after` / `_before` for dates) |
+| `search` | `<param>_search` |
+
+So `{"field": "plan_name", "match": "text"}` exposes `plan_name_contains`, not `plan_name`.
+
+### `match: search` — the ranked param
+
+`match: search` exposes a **ranked similarity** param (`<field>_search`) compiling to the `search` operator. It is the **only** match that reaches `search`, and therefore the only way a field's `x-search` tuning (`mode`, `threshold`) affects an agent-facing tool — `match: text` is a plain `%contains%` (`ilike`): case-insensitive, but accent-**sensitive** and typo-intolerant.
+
+- **Plain string fields only**; `enum`/`pattern` don't apply (the value is a fuzzy query, not a value to pick), and a field whose `x-search` sets `searchable: false` is rejected at config-write.
+- **Tuning is top-level-only.** `x-search` is read from top-level schema properties, so a `search` param on a nested path (`address.city`) works but uses the default blend — a nested `x-search` is not applied (see `references/querying.md`).
+- **Ordering:** when a search param is filled, results come back best-match-first by default; an explicit `sort` overrides that.
+- **Native record_types only.** Like every non-`eq` match, `search` isn't forwardable to a proxy-backed source — such a call fails loudly rather than silently ignoring the filter.
+- **Rank is not existence — pick a `threshold` deliberately.** Everything above the cutoff is returned ranked, so a value that *doesn't exist* can still return a confident-looking near-match of something else. This bites hardest with `mode: name` on datasets sharing a prefix token (e.g. hundreds of plans all starting `AMIL`), where scores compress high and stop discriminating. If your workload needs "no match" to be a reliable signal, raise `threshold` for that field, or keep a `match: exact`/`text` param alongside for confirmation.
+
+Per field you may set `param` (rename the generated param **stem** — see the table above), `match` (`exact` | `range` | `text` | `any_of` | `member` | `search` — `any_of` accepts a list and matches any; `member` exposes an **array** field as a single membership value; `search` is the ranked match above), an optional `enum` (constrain the param to a fixed set so the agent can only pick a valid value), an optional `pattern` (a regex declaring the valid format of a structured string field — e.g. an id or code shape like `^pat-[0-9]+$` — so a placeholder such as `"null"`/`"undefined"` or any wrong format is rejected with an actionable error instead of silently matching nothing; applies to an exact/any_of/member match on a plain string field, and cannot be combined with `enum`), and `description`. An array field auto-exposes as a `member` param; object fields are rejected — expose a nested path (`address.city`) instead. The generic `filter` parameter stays on the tool as the escape hatch for anything the typed params cannot express (OR / nesting); typed params and `filter` are combined with AND.
 
 ## Hiding machinery
 

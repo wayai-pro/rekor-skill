@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.54.1
+version: 1.55.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -409,7 +409,7 @@ Listing and filtering active records (and relationships) is **read-after-write c
 ] }
 ```
 
-Every field is searchable by default — `search` needs no setup. Exact filters and `search` compose in one query: put exact conditions alongside the `search` leg so the exact ones narrow the set and `search` ranks within it. To **tune** how a field is matched — `x-search` modes (`name`/`text`/`fuzzy`), `threshold`, and `searchable: false` — see **`references/querying.md`**. Search runs against the latest synced data, so a record written a moment earlier may take a brief moment to appear.
+Every field is searchable by default — `search` needs no setup. Exact filters and `search` compose in one query: put exact conditions alongside the `search` leg so the exact ones narrow the set and `search` ranks within it. To **tune** how a field is matched — `x-search` modes (`name`/`text`/`fuzzy`), `threshold`, and `searchable: false` — see **`references/querying.md`**. Search runs against the latest synced data, so a record written a moment earlier may take a brief moment to appear. To expose `search` (and its tuning) to an **agent** through a toolset, declare `match: search` on a `list` Action's `filterable_fields` — that's the only match that reaches this operator.
 
 **Sorting.** `--sort` takes a **JSON array** of terms, each `{"field":"data.<field>","direction":"asc"|"desc"}` — e.g. `--sort '[{"field":"data.created_at","direction":"desc"}]'`. Multiple terms sort lexically (first term primary). `direction` defaults to `asc` if omitted. The colon shorthand `data.name:asc` is **not** accepted — pass the JSON array form. Omit `--sort` when using `search` to keep the relevance ranking.
 
@@ -769,7 +769,7 @@ rekor toolsets delete invoicing-agent --base my-ws
 **Advanced control** lives on the first-class **Actions** a toolset references. Author an Action with the shaping config — `rekor actions upsert <id> --record_type X --operation Y --config '{…}'` (one record_type + one op) — then reference it from the toolset (`--action <id>`, or an `actions: [{ action, action_name?, description_override? }]` entry in the toolset `--config`). The per-Action knobs, one line each (full grammar + JSON examples in **`references/mcp-factory.md`**):
 
 - **tool name** — the Action `id` is the agent-facing tool name; a toolset reference can rename it per-surface with `action_name` or replace its description with `description_override`. Names must be unique across the toolset. (Relationship tools, declared inline on the toolset, keep the `name`/`names` map.)
-- **`filterable_fields`** — expose chosen fields of a `list` Action as typed params (native arguments instead of a raw filter). Per field: `param`, `match` (`exact`/`range`/`text`/`any_of`/`member`), `enum`, `pattern`, `description`.
+- **`filterable_fields`** — expose chosen fields of a `list` Action as typed params (native arguments instead of a raw filter). Per field: `param`, `match` (`exact`/`range`/`text`/`any_of`/`member`/`search`), `enum`, `pattern`, `description`. `param` is a **stem**, not always the final param name: `text` → `<param>_contains`, `range` → `<param>_min`/`_max` (`_after`/`_before` for dates), `search` → `<param>_search`; `exact`/`any_of`/`member` use it verbatim. `match: search` is the only match that reaches the ranked `search` operator (and a field's `x-search` tuning) — see `references/mcp-factory.md`.
 - **`expose_*: false` + `default_*`** — hide a `list` Action's machinery params (`filter`/`sort`/`limit`/`offset`/`fields`) and set server-side defaults; `agent_minimal: true` hides them all at once.
 - **`writable_fields`** — the write-side mirror on a `create`/`update` Action: an allowlist of exactly the fields it may set (least-privilege intent tools) that also generates a rich typed `data` schema from the record_type schema.
 - **`precondition`** — a Filter DSL compare-and-set on a `create`/`update` Action, checked against the record's current state; a miss is a 409 and nothing changes. Invisible to the agent — turns a fragile read-then-write into one race-free call (e.g. `book_slot` only if the slot is still `free`).
