@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.55.1
+version: 1.56.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -876,13 +876,13 @@ rekor report create --title "Upsert 500s on large docs" --description "..." \
   [--base-id <id>] [--record_type <name>] [--record-id <id>]   # entity pointers aid investigation
 
 # Track and verify your own reports
-rekor report list [--status shipped]      # your reports, newest first (--status shipped = awaiting your check)
-rekor report get <report_id>              # status + the message thread (the team's notes to you)
+rekor report list [--status shipped]      # your reports with titles, newest first (--status shipped = awaiting your check)
+rekor report get <report_id>              # title + description + status + the message thread
 rekor report accept <report_id>           # the shipped fix works → resolved
 rekor report contest <report_id> --reason "still reproduces because ..."   # the fix didn't work, or a dismissal is wrong → back to the team
 ```
 
-**The verification loop.** After the team escalates and a fix ships, your report moves to `shipped` — you'll get an email, and `rekor login`/`rekor status` remind you once (or find it with `rekor report list --status shipped`). Read `rekor report get <id>` (status + the team's note), then `accept` if it works or `contest --reason "..."` if it doesn't. You can also `contest` a `dismissed` report you believe is real — it routes back to the team. Contests are bounded (a cap, and the team may mark a dismissal final); past those, contact support. You can only list/read/act on reports **you** filed.
+**The verification loop.** After the team escalates and a fix ships, your report moves to `shipped` — you'll get an email, and `rekor login`/`rekor status` remind you once (or find it by title with `rekor report list --status shipped`). Read `rekor report get <id>` (the original title and description, current status, and the team's note), then `accept` if it works or `contest --reason "..."` if it doesn't. You can also `contest` a `dismissed` report you believe is real — it routes back to the team. Contests are bounded (a cap, and the team may mark a dismissal final); past those, contact support. You can only list/read/act on human-filed reports **you** filed; agent-authored reports stay in the admin triage queue.
 
 ---
 
