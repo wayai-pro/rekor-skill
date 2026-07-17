@@ -222,6 +222,8 @@ rekor actions upsert place_order --base my-ws --config '{
 
 The generated `list` tools are lenient about how structured arguments arrive: `filter` is always a JSON-encoded Filter DSL string, while `sort` and any multi-value (`any_of`) parameter accept **either** the native array **or** a JSON-encoded string of it — so an agent that serializes array arguments as strings still works. (`sort` is the same JSON array of `{"field","direction"}` terms described in the Records section of SKILL.md.)
 
+Generated tool schemas are otherwise **closed**: an argument not declared by the tool's `inputSchema` is rejected with the unknown name, a likely correction when one exists, and the valid parameter list. This includes stale typed-filter names after a rename and machinery parameters hidden by `expose_*: false` or `agent_minimal`; they are never silently discarded into a broader call.
+
 ## Which base serves the toolset
 
 `mcp.rekor.pro/t/{slug}/mcp` resolves the toolset from the base your **token** is scoped to. So:
