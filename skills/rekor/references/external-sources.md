@@ -14,6 +14,7 @@ Deep grammar for the external sources that back a record_type with an external A
 - [Named write bindings](#named-write-bindings)
 - [`id_path` (and its variants)](#id_path)
 - [`forward_filters`](#forward_filters)
+- [`local_filters`](#local_filters)
 - [Static constants, `static_body`, `body_template`](#static-constants-static_body-body_template)
 - [`{{current.*}}` / `{{prior.*}}`](#current--prior)
 - [`injections`, `executor_secrets`, caching, signing, timeout, breaker](#other-source-options)
@@ -36,6 +37,7 @@ Each source defines:
 - `get` / `list` / `create` / `update` / `delete` — per-operation endpoints. See [below](#per-operation-endpoints).
 - `id_path` — how to find the `external_id` in each upstream record. See [below](#id_path).
 - `forward_filters` — forward the agent's filter conditions to the upstream. See [below](#forward_filters).
+- `local_filters` — fetch the (bounded) collection unfiltered and apply the agent's filter + sort in Rekor. See [below](#local_filters).
 - `static_body`, `body_template`, `request_encoding` — request-body shaping. See [below](#static-constants-static_body-body_template).
 - `injections`, `executor_secrets`, `cache_ttl` + `stale_if_error`, `signing`, `timeout_ms`, `breaker` — see [below](#other-source-options).
 
@@ -87,7 +89,19 @@ Dot-path to the `external_id` within each **raw** upstream record, for upstreams
 
 ## `forward_filters`
 
-(on the `list` endpoint) — opt in to forward the agent's filter conditions to the upstream so a proxied `list`/`query` can pass a search key, a date, a parent id, etc. `fields` is the allowlist of Rekor field names that may be forwarded (each translated to the upstream's name/value via `field_mapping`); `target` (`query` for a GET, `body` for a POST/PUT/PATCH list — inferred from the method when omitted) chooses where they go. Without it, a proxied query still **rejects** any `--filter`/MCP `filter`. Currently forwards exact-match (`eq`) conditions only — a single `eq` or a flat AND of `eq`s; any other operator or shape is rejected with an actionable error rather than silently returning unfiltered data, e.g. `"list": { "url": ".../search", "method": "GET", "forward_filters": { "fields": ["email"] } }`. A forwarded value is also exposed to the read mapping as `{{filter.<field>}}` (a `computed` field or a composite `id_path`), so a row can carry the filter value the upstream leaves out of its list rows — e.g. forward `date`, then compose `starts_at` from `{{filter.date}}` + the row's time (see Compose / computed fields).
+(on the `list` endpoint) — opt in to forward the agent's filter conditions to the upstream so a proxied `list`/`query` can pass a search key, a date, a parent id, etc. `fields` is the allowlist of Rekor field names that may be forwarded (each translated to the upstream's name/value via `field_mapping`); `target` (`query` for a GET, `body` for a POST/PUT/PATCH list — inferred from the method when omitted) chooses where they go. Without it (or [`local_filters`](#local_filters)), a proxied query still **rejects** any `--filter`/MCP `filter`. Currently forwards exact-match (`eq`) conditions only — a single `eq` or a flat AND of `eq`s; any other operator or shape is rejected with an actionable error rather than silently returning unfiltered data, e.g. `"list": { "url": ".../search", "method": "GET", "forward_filters": { "fields": ["email"] } }`. A forwarded value is also exposed to the read mapping as `{{filter.<field>}}` (a `computed` field or a composite `id_path`), so a row can carry the filter value the upstream leaves out of its list rows — e.g. forward `date`, then compose `starts_at` from `{{filter.date}}` + the row's time (see Compose / computed fields).
+
+## `local_filters`
+
+(on the `list` endpoint) — the other filtering stance: when the upstream has **no filter params at all** (an endpoint that just returns all ~64 practitioners of a clinic), no `forward_filters` can ever help. Declaring `local_filters` asserts the collection is **bounded and returned whole in one page**; Rekor then fetches it unfiltered and applies the agent's full Filter DSL **and sort** in-memory — every operator except `search` works (`has`, ranges, `in`, `like`/`ilike` with accent-folding), pagination is post-filter, and typed params behave exactly as they do against a native record_type. `{ "list": { "url": ".../professionals", "method": "GET", "local_filters": {} } }`; optional `max_rows` (default 500, ceiling 999) bounds the fetch.
+
+Rules and sharp edges:
+
+- **Mutually exclusive with `forward_filters`** — pick one stance per list endpoint. An upstream that *requires* an input param still gets it via a `{{query.*}}` token in the `url` (note: that hatch reaches REST/CLI list params, not MCP factory tools, which pass no free-form query params).
+- **Fail-loud on truncation.** A fetch that returns (or reports via `total_path`) more than `max_rows` rows errors instead of silently filtering a partial collection. One edge is undetectable: an upstream that caps its page size below the fetch **and** declares no `total_path` — only declare `local_filters` on endpoints that genuinely return the whole collection in one page.
+- **Set `cache_ttl` alongside it.** With a read-through cache, the whole collection is fetched once per TTL and every filter value is served from that one cached page; without it, every filtered list refetches the collection upstream.
+- **`search` is rejected** (config-write, promote, and at request time): ranked search has no in-memory evaluator. Use `match: "text"` (substring, accent-insensitive) on typed params instead. This is a deliberate, documented residual: `match: "search"` works against a native/eval store and is refused through a `local_filters` source.
+- **Envelope timestamps are fetch-time.** A proxied row's `created_at`/`updated_at` are when Rekor fetched it (and `version` is always 1) — filtering or sorting on them is meaningless; target `data.*` fields. A filter-only request preserves the upstream's row order; ordering only changes when you pass an explicit `sort`.
 
 ## Static constants, `static_body`, `body_template`
 

@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.56.0
+version: 1.57.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -128,7 +128,7 @@ The bundled `references/` files carry the full option grammar — read the match
 | Reference file | Read when | Contents |
 |---|---|---|
 | `references/querying.md` | Writing non-trivial SQL, tuning `search`, setting timezones | SQL example gallery (arrays, `ARRAY JOIN`, CTEs, `--param`, fuzzy ranking), `x-search` modes/threshold, datetime & timezone configuration |
-| `references/external-sources.md` | Configuring any external source | Full source grammar: `field_mapping` rules (value maps, transforms, split/destructure/computed, per-op overrides), per-op endpoints, named write bindings, `id_path` variants, `forward_filters`, body shaping, `{{current.*}}`/`{{prior.*}}`, caching/signing/timeout/breaker, SSRF rules, a worked legacy-upstream example |
+| `references/external-sources.md` | Configuring any external source | Full source grammar: `field_mapping` rules (value maps, transforms, split/destructure/computed, per-op overrides), per-op endpoints, named write bindings, `id_path` variants, `forward_filters`, `local_filters`, body shaping, `{{current.*}}`/`{{prior.*}}`, caching/signing/timeout/breaker, SSRF rules, a worked legacy-upstream example |
 | `references/mcp-factory.md` | Authoring Actions or toolsets beyond the defaults | Full Action + toolset grammar: `filterable_fields`, `expose_*`/`default_*`/`agent_minimal`, `writable_fields`, `precondition`, `binding`, composite Actions, tool naming, which base serves a toolset slug |
 | `references/executors.md` | Building or deploying an executor | The `rekor-sdk` contract (verify, dedupe, error envelope), signed write-back, where to host, the vault certificate pull pattern, local dev, retries |
 | `references/providers.md` | Importing/exporting provider tool definitions | Exact `rekor providers` command forms per provider (OpenAI/Anthropic/Google/MCP) |
@@ -661,6 +661,7 @@ Each source defines the menu below (full grammar, every option's rules, and a wo
 - **Named write bindings** (`create`/`update`/`delete`) — declare a write op as a map of named endpoint variants when one canonical entity's writes fan out to several backend endpoints; the caller picks one by name (via a tool's `bindings`), keeping ONE record_type.
 - `id_path` — where the `external_id` lives in each raw upstream record (dot-path, composite template, or create-only/request-templated variants) for upstreams not keyed on `id`.
 - `forward_filters` (on `list`) — forward the agent's `eq` filter conditions upstream (allowlisted `fields`, `query`/`body` target); also exposed to read mappings as `{{filter.<field>}}`.
+- `local_filters` (on `list`) — for an upstream with **no filter params**: declare the collection bounded, fetch it whole, and Rekor applies the full filter + sort in-memory (all operators but `search`; native pagination). Mutually exclusive with `forward_filters`; optional `max_rows` (default 500).
 - `static_body` / `body_template` / `request_encoding` — constant, templated, and form-encoded request-body shaping (e.g. put the id in the body for legacy verbs).
 - `injections` / `executor_secrets` — extra per-request vault secrets in a header/body, and named credentials an executor pulls at dispatch (e.g. an mTLS cert).
 - `cache_ttl`+`stale_if_error` / `signing` / `timeout_ms` / `breaker` — read-through caching, HMAC signing (for executors), per-request timeout, and the per-source circuit breaker.
