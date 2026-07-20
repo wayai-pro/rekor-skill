@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.57.0
+version: 1.58.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -423,12 +423,14 @@ Every field is searchable by default — `search` needs no setup. Exact filters 
 
 ```jsonc
 "patient_id":      { "type": "string", "x-fk": { "record_type": "patients" } },                 // matches patients by external_id (default)
-"professional_id": { "type": "string", "x-fk": { "record_type": "professionals", "key": "code" } } // matches a named field on the target
+"professional_id": { "type": "string", "x-fk": { "record_type": "professionals", "key": "code" } }, // matches a named field on the target
+"note_patient_id": { "type": "string", "x-fk": { "record_type": "patients", "key": "id" } }     // matches the target's system id
 ```
 
-- `key` is the field on the **target** that the value must match — `external_id` by default, or any top-level field (e.g. a `code`).
+- `key` is the field on the **target** that the value must match — `external_id` by default, the target's system `id`, or any top-level field (e.g. a `code`).
+- Use `key: "id"` when the target is a native record with **no external_id**. The system id is assigned when the record is created, so create the target first, read its `id` back, then reference it — this can't be done in one batch pass or a seed fixture (those resolve by `external_id`), so use `external_id`/data keys there.
 - Checked on every write (create, full upsert, partial update, batch). Empty/absent values are skipped — mark the field `required` if it must be present.
-- In a **batch**, write the target before the record that references it (the batch is atomic — a bad reference rejects the whole batch).
+- In a **batch**, write the target before the record that references it (the batch is atomic — a bad reference rejects the whole batch). This ordering only helps `external_id`/data keys — an `id` key needs the target created in a prior write (see above).
 - Use foreign keys for **reference data** (patients, plans, products), not high-volume event logs — a referenced record_type is kept readily available so the check stays fast.
 
 ### Attachments
