@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.58.0
+version: 1.59.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -533,14 +533,16 @@ Deleting a relationship type also removes all relationships of that type.
 ### Relationships
 
 ```bash
-rekor relationships upsert --base <ws> --type <type> [--source <col/id> | --source-external <col/external_id> [--source-external-source <name>]] [--target <col/id> | --target-external <col/external_id> [--target-external-source <name>]] [--id <id>] [--data <json>]
-rekor relationships get <id> --base <ws>
-rekor relationships delete <id> --base <ws>
+rekor relationships upsert --base <ws> --type <type> [--source <col/id> | --source-external <col/external_id> [--source-external-source <name>]] [--target <col/id> | --target-external <col/external_id> [--target-external-source <name>]] [--id <id>] [--external-id <key> [--external-source <name>]] [--data <json>]
+rekor relationships get <id> --base <ws> [--rel-type <type> [--external-source <name>]]
+rekor relationships delete <id> --base <ws> [--rel-type <type> [--external-source <name>]]
 rekor relationships history <id> --base <ws> [--limit <n>] [--offset <n>] [--diff]
 rekor query-relationships <record_type> <id> --base <ws> [--type <type>] [--direction outgoing|incoming|both] [--limit <n>] [--offset <n>]
 ```
 
 Each endpoint takes exactly one of `--source`/`--source-external` (same for target). External addressing resolves active records only and requires the record to exist; an internal id is stored as given.
+
+A relationship can also carry its **own** external key: `--external-id` on upsert makes creation idempotent (a retried upsert with the same key updates the first row instead of duplicating it), and `get`/`delete` accept that key in place of the id when `--rel-type` scopes it. In the API these are the top-level `external_id`/`external_source` fields (also on batch `upsert_relationship` ops and generated link tools), and `GET`/`DELETE /relationships/<external_id>?rel_type=<type>` for addressing.
 
 The `--type` must be a declared relationship type. `--data` is validated against that type's schema.
 
