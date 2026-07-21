@@ -301,6 +301,16 @@ rekor relationships upsert --base my-ws \
 
 Omit `--schema` to allow any metadata; pass `--schema` to validate the relationship's `--data` against a JSON Schema.
 
+Each endpoint can also be addressed by **external_id** instead of the internal record id — handy when you just upserted the records by external_id and never kept the returned ids:
+
+```bash
+rekor relationships upsert --base my-ws \
+  --source-external invoices/inv-2026-001 --target-external customers/cust-42 \
+  --type belongs_to
+```
+
+Exactly one of `--source`/`--source-external` per endpoint (same for target); add `--source-external-source <name>` when the external_id is scoped to a source system. The two modes differ on missing records: an internal id is stored as given (linking before the record exists is allowed), while external addressing **requires the record to exist** — the write fails with a clear error otherwise. The API mirrors this: `source_external_id`/`target_external_id` (+ optional `*_external_source`) in place of `source_id`/`target_id`.
+
 ### 5. Traverse relationships
 
 ```bash
@@ -523,12 +533,14 @@ Deleting a relationship type also removes all relationships of that type.
 ### Relationships
 
 ```bash
-rekor relationships upsert --base <ws> --source <col/id> --target <col/id> --type <type> [--id <id>] [--data <json>]
+rekor relationships upsert --base <ws> --type <type> [--source <col/id> | --source-external <col/external_id> [--source-external-source <name>]] [--target <col/id> | --target-external <col/external_id> [--target-external-source <name>]] [--id <id>] [--data <json>]
 rekor relationships get <id> --base <ws>
 rekor relationships delete <id> --base <ws>
 rekor relationships history <id> --base <ws> [--limit <n>] [--offset <n>] [--diff]
 rekor query-relationships <record_type> <id> --base <ws> [--type <type>] [--direction outgoing|incoming|both] [--limit <n>] [--offset <n>]
 ```
+
+Each endpoint takes exactly one of `--source`/`--source-external` (same for target). External addressing resolves active records only and requires the record to exist; an internal id is stored as given.
 
 The `--type` must be a declared relationship type. `--data` is validated against that type's schema.
 
@@ -676,13 +688,15 @@ Execute up to 1,000 operations atomically — all succeed or all fail:
 
 ```bash
 rekor batch --base <ws> --operations '[
-  {"type":"upsert_record","record_type":"invoices","data":{"customer":"A","amount":100}},
-  {"type":"upsert_record","record_type":"invoices","data":{"customer":"B","amount":200}},
-  {"type":"upsert_relationship","rel_type":"related_to","source_record_type":"invoices","source_id":"id1","target_record_type":"invoices","target_id":"id2"}
+  {"type":"upsert_record","record_type":"invoices","external_id":"inv-1","data":{"customer":"A","amount":100}},
+  {"type":"upsert_record","record_type":"customers","external_id":"cust-1","data":{"name":"A"}},
+  {"type":"upsert_relationship","rel_type":"belongs_to","source_record_type":"invoices","source_external_id":"inv-1","target_record_type":"customers","target_external_id":"cust-1"}
 ]'
 ```
 
 Operation types: `upsert_record`, `delete_record`, `upsert_relationship`, `delete_relationship`, `upsert_record_type`, `delete_record_type`
+
+A relationship op addresses each endpoint by internal id (`source_id`/`target_id`) or by external key (`source_external_id` + optional `source_external_source`) — exactly one per endpoint. Because ops run in order inside one transaction, the example above creates two records and links them in a single atomic call: the link resolves the external_ids the earlier ops just wrote, and a resolution miss rolls the whole batch back.
 
 **Reading results**: the default (table) output prints a one-line summary per operation (index, type, resulting id). Add `--output json` for the full per-operation payload — the complete record/relationship of every write. Because the batch is atomic, a single failing operation rolls the **whole** batch back and the command exits non-zero with `Operation <N> failed: <reason>` naming the offending index — no partial writes land.
 

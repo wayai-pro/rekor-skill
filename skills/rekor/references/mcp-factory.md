@@ -215,8 +215,8 @@ rekor actions upsert place_order --base my-ws --config '{
 }'
 ```
 
-- Reference it from a toolset like any Action (`--action place_order`, or an `actions: [{ "action": "place_order" }]` entry). The generated tool takes one input object per step key — record steps take `data` (+ `external_id` for an idempotent upsert, or `id` for delete); relationship steps take `source_record_type`/`source_id`/`target_record_type`/`target_id` (+ `id` for delete). The agent never sees the preconditions — they're injected server-side.
-- Cross-step references (linking to a record the *same* action just created by its server-assigned id) aren't supported yet — address each step with values you already hold (e.g. an `external_id` you set on the create step and reuse on a link step).
+- Reference it from a toolset like any Action (`--action place_order`, or an `actions: [{ "action": "place_order" }]` entry). The generated tool takes one input object per step key — record steps take `data` (+ `external_id` for an idempotent upsert, or `id` for delete); relationship steps take `source_record_type`/`target_record_type` plus, per endpoint, exactly one of the internal id (`source_id`/`target_id`) or the external key (`source_external_id`/`target_external_id`, with optional `source_external_source`/`target_external_source`) — and `id` for delete. The agent never sees the preconditions — they're injected server-side.
+- Cross-step references work through external ids: set an `external_id` on a create step and address the link step's endpoint with `source_external_id`/`target_external_id` — steps run in order inside one transaction, so the link resolves the record the same action just created. (Referencing a same-action record by its *server-assigned* id remains impossible — the id doesn't exist until the step runs.) External addressing requires the record to exist by the time the link step runs; a miss rejects the whole action.
 
 ## Lenient list-tool arguments
 
