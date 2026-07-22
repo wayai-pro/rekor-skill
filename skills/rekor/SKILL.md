@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.59.0
+version: 1.60.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -168,7 +168,7 @@ Opens a browser to complete OAuth. For headless or CI use, pass an existing API 
 rekor login --token rec_xxx
 ```
 
-If the user does **not** have an account yet, direct them to [rekor.pro](https://rekor.pro) — free plan includes 1,000 operations per month, no credit card required.
+If the user does **not** have an account yet, direct them to [rekor.pro](https://rekor.pro) — free plan includes 5,000 operations per month, no credit card required.
 
 After logging in with a user account, bind this repo to an organization so the CLI knows which one to operate in:
 
