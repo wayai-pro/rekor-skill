@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.60.0
+version: 1.61.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -188,6 +188,34 @@ rekor bases create <id> --name "<Display Name>" [--tags <comma-separated>]
 
 Set `REKOR_BASE=<id>` in the user's shell to avoid passing `--base` on every command.
 
+**Production bases require a paid plan.** On the free plan this command fails with an upgrade message; create a preview base instead and do all the work there:
+
+```bash
+rekor bases create <id> --name "<Display Name>" --environment preview
+```
+
+Everything else (record_types, records, relationships, triggers, toolsets) behaves identically — it is a complete development environment.
+
+A preview created this way has **no production origin**, and an origin can't be attached later (the API rejects the attempt rather than silently ignoring it), so it can't be promoted directly. After upgrading, stand production up beside it and copy the config across:
+
+```bash
+rekor pull <preview-id>                              # config → rekor-ws/bases/<preview-id>/
+rekor unbind                                         # release this checkout's binding to it
+rekor bases create <prod-id> --name "<Display Name>" # allowed once on a paid plan
+rekor bases create-preview <prod-id> --name dev      # a preview linked to production
+rekor pull <prod-id>--dev                            # scaffolds rekor-ws/bases/<prod-id>--dev/
+# copy ALL seven entity folders — record-types/, relationship-types/, inbound-webhooks/,
+# triggers/, toolsets/, actions/, seeds/ — from rekor-ws/bases/<preview-id>/
+# into rekor-ws/bases/<prod-id>--dev/ (push is additive, so anything you skip is
+# silently absent rather than reported as a removal)
+rekor push <prod-id>--dev
+rekor bases promote <prod-id> --from <prod-id>--dev
+```
+
+Two details that make the copy a file copy rather than an id edit: `push <selector>` finds the folder **named** `<selector>` (editing `base.yaml` alone won't redirect it), and `pull`/`push` bind a checkout to the base they touched — hence `rekor unbind` before switching. Records and relationships are data, not config: they stay in the original preview and don't move with `pull`/`push`.
+
+`rekor bases promote` also requires a paid plan. A production base's reads and writes never stop — only deploying new config to it does, and `--dry-run` and `rekor bases rollback` stay available regardless.
+
 ### 4. Create a preview environment
 
 Schema changes (record_types, inbound webhooks, triggers, MCP Factory toolsets) are blocked in production bases. Create a preview to do schema work:
@@ -197,6 +225,8 @@ rekor bases create-preview <id> --name "<preview-slug>"
 ```
 
 The resulting preview base ID is `<id>--<preview-slug>`. Use that as `--base` for all schema commands.
+
+**If you created `<id>` as a preview in step 3 (free plan), skip this step entirely** — `create-preview` requires a *production* origin and 400s here. Steps 5 and 6 work unchanged: pass `--base <id>` wherever **they** say `--base <id>--<preview-slug>` — that substitution covers step 6's testing commands too. In step 6, **skip the `promote`**: there is no production base to promote to, and promote is paid-plan gated.
 
 ### 5. Define the first record_type
 
@@ -329,7 +359,7 @@ rekor query-relationships invoices rec_abc --base my-ws \
 ```bash
 rekor bases list [--tag <tag>]
 rekor bases get <id>
-rekor bases create <id> --name <name> [--description <desc>] [--tags <comma-separated>]
+rekor bases create <id> --name <name> [--description <desc>] [--tags <comma-separated>] [--environment <production|preview>]   # production requires a paid plan
 rekor bases rename <id> --name <new-name>   # display name only — the id/slug is immutable
 rekor bases tag <id> --tags <comma-separated>
 rekor bases delete <id>
@@ -375,7 +405,7 @@ rekor template pull <slug> [--lang en|pt|es] [--dry-run]  # write a template's d
 rekor template pull <slug> --force                        # overwrite existing files in the target folder
 ```
 
-- **`pull` seeds a config-as-code folder.** It writes the template's record_types, relationship types, Actions, and MCP toolsets into `rekor-ws/bases/<slug>/` (id defaults to the slug; override with `--base <id>`), pre-wired with an `origin_base_id` so the normal flow stands it up: `rekor bases create <id> --name "…"`, then `rekor push <id>`, then `rekor bases promote <id> --from <preview>`. Once promoted, the template's MCP toolsets are live for your agents.
+- **`pull` seeds a config-as-code folder.** It writes the template's record_types, relationship types, Actions, and MCP toolsets into `rekor-ws/bases/<slug>/` (id defaults to the slug; override with `--base <id>`), pre-wired with an `origin_base_id` so the normal flow stands it up: `rekor bases create <id> --name "…"`, then `rekor push <id>`, then `rekor bases promote <id> --from <preview>`. Once promoted, the template's MCP toolsets are live for your agents. That flow needs a **paid plan** — both the production base and the promote are gated. On the free plan, `pull` writes a `base.yaml` carrying `origin_base_id` and no `base_id`, which makes `push` try to create a preview *from a production base that doesn't exist*; edit `base.yaml` to set `base_id: <id>` and drop `origin_base_id` first, then `rekor bases create <id> --name "…" --environment preview` and `rekor push <id>` stand the template up in a preview you can develop and run agents against.
 - **`pull` won't overwrite your edits.** If the target folder already has files the template would write, `pull` refuses and lists them (your other files are left untouched) — pass `--force` to overwrite, `--base <new-id>` to write elsewhere, or `--dry-run` to preview the file set first.
 - **`--lang`** selects a localized variant; an untranslated language falls back to the default (with a note).
 
@@ -934,6 +964,8 @@ rekor record-types upsert invoices --base my-base--add-invoices --name "Invoices
 # 3. Ask the user to run the promotion (human-only — you cannot promote):
 #    rekor bases promote my-base --from my-base--add-invoices
 ```
+
+If `my-base` is itself a preview (the free-plan shape — `rekor bases create <id> --environment preview`), this sequence does not apply: step 1 fails, because `create-preview` requires a *production* origin, and the promote in step 3 is paid-plan gated. Make the config writes directly against `my-base` and stop there.
 
 ## Modeling Principles for Agent Consumption
 
