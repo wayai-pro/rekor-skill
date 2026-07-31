@@ -18,6 +18,7 @@ A toolset `actions[]` entry only accepts `action`, `action_name`, and `descripti
 - [Typed filter params (`filterable_fields`)](#typed-filter-params-filterable_fields)
 - [Machinery params — hidden by default (`expose_*` / `default_*`)](#machinery-params--hidden-by-default)
 - [Curated write surface (`writable_fields`)](#curated-write-surface-writable_fields)
+- [Baked-in read predicates (`base_filter`)](#baked-in-read-predicates-base_filter)
 - [Conditional writes (`precondition`)](#conditional-writes-precondition)
 - [Guarded + unguarded writes on one record_type](#guarded--unguarded-writes-on-one-record_type)
 - [Selecting a named write binding (`binding`)](#selecting-a-named-write-binding-binding)
@@ -181,6 +182,33 @@ rekor actions upsert reschedule_appointment --base my-ws --record_type appointme
 
 Per field you may set `param` (rename the key the agent sets in `data` — the tool maps it back to the real field) and `description` (override the field's description). Fields are **top-level only** (writes merge at the top level — a partial update changes just the fields you send and leaves the rest untouched; nested objects are replaced whole). The record_type schema stays the validation source of truth — `writable_fields` shapes *which* fields the tool exposes and *how they are described*, it does not re-validate values. Omit `writable_fields` to keep the generic any-field `data` slot.
 
+## Baked-in read predicates (`base_filter`)
+
+A read-shape knob on a **`list`** Action. `base_filter` is a Filter-DSL expression AND-merged into every call of that tool, **server-side and invisible to the agent** — it never appears in the generated `inputSchema`.
+
+```bash
+rekor actions upsert list_active_practitioners --base my-ws --record_type practitioners --operation list --config '{
+  "base_filter": { "field": "data.status", "op": "eq", "value": "active" },
+  "filterable_fields": [ { "field": "specialty", "match": "exact" } ]
+}'
+```
+
+The agent sees one parameter (`specialty`) and cannot see, set, or widen the status predicate. This is the read-side twin of `precondition`: the alternative — an optional `status` param the model is supposed to know to fill — is exactly the shape that invites an invented value.
+
+Use it to carve a narrow tool out of a broad record_type: `list_active_practitioners` and `list_open_tickets` are the same `list` Action shape with a different predicate baked in, and each reads to the model as a single-purpose tool.
+
+- **Combines flat.** The baked predicate, the typed params, and (if exposed) the raw `filter` are AND-combined into ONE group rather than nested pairwise, so the merge costs exactly **one** nesting level no matter how many parts are present. Config-write reserves that level (a `base_filter` is validated in its merged shape, so one that only fits un-merged is rejected up front). The level is not free, though: an agent filter already at the maximum depth will now be one over, so a `base_filter` costs the raw escape hatch one level of headroom.
+- **`list` only.** Rejected on a `get`, which fetches one record by key and has no filter to merge into.
+- **Native record_types only.** A source forwards only the filters it declares, so an invisible predicate on a proxy-backed record_type would either be dropped upstream (silently widening the result the tool promised to narrow) or fail every call with an error naming a filter the agent never sent. Rejected at config-write, and re-checked at promote in case a promote ADDS a source.
+- **No `search`.** It would route every call off the read-after-write path; an invisible predicate must not silently change where the tool reads from.
+- **Paths** address record data (`data.status`, or a bare `status`) and must resolve against the record_type schema — checked at config-write and again at promote, since a dangling predicate would surface to the agent as "no results" with no way to recover. Bare paths are stored canonicalized, so `rekor pull` always writes `data.status`.
+- **The field must be comparable by the operator.** A value comparison needs a field the schema shows to be scalar — a declared `string`/`number`/`integer`/`boolean`, or (with no declared type) an `enum`/`const` of scalar values, which is how a workflow status field is spelled. **Array** fields take `has` and nothing else (any other operator compares the whole array and matches inconsistently); conversely `has` requires an array. Everything else — objects, maps, `$ref`/`oneOf`-composed fields, a bare `{}` — is rejected with a message naming the fix: address a nested path like `data.address.city`, declare the field's type, or use `is_null`/`is_not_null`, which are presence checks and stay valid against any shape.
+
+  The rule is stated as what's *allowed* rather than what's blocked, deliberately: JSON Schema has open-ended ways to express structure, so an unrecognized shape is refused at config-write with an actionable error rather than becoming a predicate that silently matches nothing.
+- **A filterless Action with a `base_filter` no longer forwards the raw `filter` verbatim** — merging requires parsing it first. Practically this means a malformed `filter` is rejected by the translator rather than the engine; the error is the same class either way.
+
+**It is not a security boundary.** Like `precondition`, it shapes the generated tool, not the record_type: a caller with raw REST access to the same base still reads unfiltered rows, and a toolset-bound token's *surface* check is at record_type + operation granularity (filter shape has never been an access boundary). Scope data access with token grants; use `base_filter` to make the agent's job unambiguous, not to keep rows secret.
+
 ## Conditional writes (`precondition`)
 
 A write-shape knob on a **`create`**/**`update`** Action — a Filter DSL expression checked against the record's **current** state before the write applies. If it does not hold, the write is rejected with a 409 conflict and nothing changes; if it holds, the write proceeds. This turns a fragile read-then-write into one correct, race-free call: model a bookable slot as a record and make "book it" a guarded update, so two agents cannot both book the same slot.
@@ -264,4 +292,4 @@ Generated tool schemas are otherwise **closed**: an argument not declared by the
 
 If the slug cannot be resolved for your token's base (unknown toolset, or one that only exists in a preview you are not scoped to), `initialize` returns a clear JSON-RPC error telling you to scope to the preview base id or promote — it will not silently hand back a session with zero tools.
 
-**Promotion blocking.** Promotion is blocked if it would break a published toolset — removing a record_type or relationship type it exposes, dropping an Action a reference points at, or removing a field its `filterable_fields`, `writable_fields`, or `precondition` depend on, or a named write binding an Action's `binding` selects — so promote the Actions and toolset together with the schema change (a dry run lists any such conflicts first).
+**Promotion blocking.** Promotion is blocked if it would break a published toolset — removing a record_type or relationship type it exposes, dropping an Action a reference points at, or removing a field its `filterable_fields`, `writable_fields`, `base_filter`, or `precondition` depend on, or a named write binding an Action's `binding` selects — so promote the Actions and toolset together with the schema change (a dry run lists any such conflicts first).

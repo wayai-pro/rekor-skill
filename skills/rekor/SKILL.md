@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.62.0
+version: 1.63.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -130,7 +130,7 @@ The bundled `references/` files carry the full option grammar — read the match
 |---|---|---|
 | `references/querying.md` | Writing non-trivial SQL, tuning `search`, setting timezones | SQL example gallery (arrays, `ARRAY JOIN`, CTEs, `--param`, fuzzy ranking), `x-search` modes/threshold, datetime & timezone configuration |
 | `references/external-sources.md` | Configuring any external source | Full source grammar: `field_mapping` rules (value maps, transforms, split/destructure/computed, per-op overrides), per-op endpoints, named write bindings, `id_path` variants, `forward_filters`, `local_filters`, body shaping, `{{current.*}}`/`{{prior.*}}`, caching/signing/timeout/breaker, SSRF rules, a worked legacy-upstream example |
-| `references/mcp-factory.md` | Authoring Actions or toolsets beyond the defaults | Full Action + toolset grammar: `filterable_fields` (incl. `optional`), `expose_*`/`default_*`, `writable_fields`, `precondition`, `binding`, composite Actions, tool naming, which base serves a toolset slug |
+| `references/mcp-factory.md` | Authoring Actions or toolsets beyond the defaults | Full Action + toolset grammar: `filterable_fields` (incl. `optional`), `expose_*`/`default_*`, `writable_fields`, `base_filter`, `precondition`, `binding`, composite Actions, tool naming, which base serves a toolset slug |
 | `references/executors.md` | Building or deploying an executor | The `rekor-sdk` contract (verify, dedupe, error envelope), signed write-back, where to host, the vault certificate pull pattern, local dev, retries |
 | `references/providers.md` | Importing/exporting provider tool definitions | Exact `rekor providers` command forms per provider (OpenAI/Anthropic/Google/MCP) |
 
@@ -822,12 +822,13 @@ rekor toolsets delete invoicing-agent --base my-ws
 - **`filterable_fields`** — expose chosen fields of a `list` Action as typed params (native arguments instead of a raw filter). Per field: `param`, `match` (`exact`/`range`/`text`/`any_of`/`member`/`search`), `enum`, `pattern`, `optional`, `description`. A declared field is **required** by default (it's the tool's question) — `optional: true` opts out, and a range's two bounds are always optional. `param` is a **stem**, not always the final param name: `text` → `<param>_contains`, `range` → `<param>_min`/`_max` (`_after`/`_before` for dates), `search` → `<param>_search`; `exact`/`any_of`/`member` use it verbatim. `match: search` is the only match that reaches the ranked `search` operator (and a field's `x-search` tuning) — see `references/mcp-factory.md`.
 - **`expose_*` + `default_*`** — a `list` Action's machinery params (`filter`/`sort`/`limit`/`offset`/`fields`) are **hidden by default**, so the tool is pure semantics. `expose_<param>: true` opts one back in; `default_*` sets the server-side value applied while a param stays hidden (a hidden `limit` defaults to a generous page).
 - **`writable_fields`** — the write-side mirror on a `create`/`update` Action: an allowlist of exactly the fields it may set (least-privilege intent tools) that also generates a rich typed `data` schema from the record_type schema.
+- **`base_filter`** — a Filter DSL predicate AND-merged server-side into every call of a `list` Action, invisible to the agent. Carves a narrow tool out of a broad record_type (`list_active_practitioners` = the list Action + `status = active` baked in) instead of exposing an optional `status` param the model must know to fill. `list` + native record_types only; not a security boundary (see `references/mcp-factory.md`).
 - **`precondition`** — a Filter DSL compare-and-set on a `create`/`update` Action, checked against the record's current state; a miss is a 409 and nothing changes. Invisible to the agent — turns a fragile read-then-write into one race-free call (e.g. `book_slot` only if the slot is still `free`).
 - **`binding`** — pick which **named write binding** of a proxy source's op a write Action dispatches to (see External Sources), keeping one canonical record_type whose writes fan out to several endpoints.
 
 Connect agents to the toolset URL with a token scoped to exactly one base. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts. For least-privilege, mint a token bound to the toolset in one step: `rekor tokens create-for-toolset <slug> --base <db>` (or pass `--mint-token` to `rekor toolsets upsert`). A toolset-bound token's authorization IS the toolset's tool surface — exactly those record_types and operations, relationships, batch, and SQL only if you enabled it, nothing else — so a leaked token can't reach beyond the tools you exposed, and you can rotate or revoke one per agent.
 
-Toolsets can only be created/modified in preview bases. Promote to production when ready; promotion is blocked if it would break a published toolset (a removed record_type/rel-type, or a field its typed filters/`writable_fields`/`precondition`/`bindings` depend on) — a dry run lists conflicts first. `mcp.rekor.pro/t/{slug}/mcp` resolves the toolset from the base your **token** is scoped to, so connect with a production token for the promoted toolset or a preview-base token to sandbox-test the not-yet-promoted one (`references/mcp-factory.md` covers the resolution rules).
+Toolsets can only be created/modified in preview bases. Promote to production when ready; promotion is blocked if it would break a published toolset (a removed record_type/rel-type, or a field its typed filters/`writable_fields`/`base_filter`/`precondition`/`bindings` depend on) — a dry run lists conflicts first. `mcp.rekor.pro/t/{slug}/mcp` resolves the toolset from the base your **token** is scoped to, so connect with a production token for the promoted toolset or a preview-base token to sandbox-test the not-yet-promoted one (`references/mcp-factory.md` covers the resolution rules).
 
 ### API Tokens
 
@@ -992,7 +993,7 @@ How to shape the tools an agent actually calls. Rekor's defaults already impleme
 2. **Machinery stays hidden.** `filter`, `sort`, `limit`, `offset`, `fields` are off by default; the tool's inputSchema is pure semantics. Opt one back in with `expose_<param>: true` only when the agent genuinely needs to drive it, and set `default_limit` / `default_fields` instead so the server decides.
 3. **Declared parameters are required; optionality is a choice you defend.** A `filterable_fields` entry is the tool's question, so it's required by default. Add `optional: true` for a genuine narrowing filter — and if a tool accumulates several, that's the signal to split it by intent instead. (Range fields are always optional: their two bounds can't be mandatory.)
 4. **Every discrete string parameter gets a closed shape.** An `enum` (pick from a set — best declared on the record_type schema so writes validate too) or a `pattern` (one valid format, e.g. `^\+[1-9][0-9]{6,14}$`). An unconstrained optional string filter is where invented values come from.
-5. **What the agent shouldn't decide is injected server-side.** A `precondition` guards a state-dependent write invisibly; `writable_fields` bounds what a write may touch; `external_source` / `bindings` route it. None of these are agent-facing parameters.
+5. **What the agent shouldn't decide is injected server-side.** A `base_filter` scopes what a read can see; a `precondition` guards a state-dependent write invisibly; `writable_fields` bounds what a write may touch; `external_source` / `bindings` route it. None of these are agent-facing parameters.
 6. **Rejections teach the next move.** The error message is the recovery channel (MCP clients drop `error.details`), so it must name the parameter and the fix. This is why a bad value must fail loudly rather than compile into a filter that returns zero rows.
 
 **Counter-rule:** split by *intent*, never by combinatorics. Three clearly-named tools beat one five-parameter tool; fifteen near-identical variants are worse than either, because tool selection degrades too.
@@ -1008,6 +1009,7 @@ The principles above are agent-layer and backend-neutral; these are the specific
 - **Constrain a structured id or code** — `filterable_fields[].pattern` (e.g. `^pat-[0-9]+$`); published to the tool schema and enforced at runtime.
 - **Require a value at all** — automatic: a declared `filterable_fields` entry is required unless marked `optional: true` (a `range` field's two bounds are always optional), and a required param rejects blank / empty-selection input (the model can't fake compliance with `""` or `[]`).
 - **Fail loud + actionable, never silent** — `x-fk` on write fields; the empty / `enum` / `pattern` rejections on read params (read/write parity).
+- **Scope a tool to a subset without an agent-facing filter** — `base_filter` on a `list` Action (invisible, always applied).
 - **Make a state-dependent write atomic + race-free** — a `create`/`update` tool with a `precondition` (compare-and-set; invisible to the agent; 409 on conflict).
 - **Nudge the agent toward the right value** — `filterable_fields[].description`: name the field's kind, source, and when to use it; use placeholder shapes, never real data values.
 
