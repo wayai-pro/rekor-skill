@@ -6,7 +6,7 @@ Deep grammar for MCP Factory toolsets. The SKILL.md **MCP Factory** section cove
 
 A toolset is composed from first-class **Actions**. The model is two steps:
 
-1. **Author Actions** with `rekor actions upsert`. An Action is *one record_type + one operation* (`create` / `get` / `list` / `update` / `delete`) with an immutable slug `id`. The Action **owns** the guard/shaping config: `filterable_fields`, `expose_*`, `default_*`, `agent_minimal` for reads (`get`/`list`); `writable_fields`, `precondition`, `binding` for writes (`create`/`update`/`delete`). The Action `id` is the agent-facing tool name by default.
+1. **Author Actions** with `rekor actions upsert`. An Action is *one record_type + one operation* (`create` / `get` / `list` / `update` / `delete`) with an immutable slug `id`. The Action **owns** the guard/shaping config: `filterable_fields`, `expose_*`, `default_*` for reads (`get`/`list`); `writable_fields`, `precondition`, `binding` for writes (`create`/`update`/`delete`). The Action `id` is the agent-facing tool name by default.
 2. **Compose a Toolset** with `rekor toolsets upsert`. Its `actions` are **references** to Actions by id — each entry is `{ "action": "<action_id>", "action_name"?: "...", "description_override"?: "..." }`, nothing more. Relationship tools, batch, and `sql_query` are declared on the toolset itself.
 
 A toolset `actions[]` entry only accepts `action`, `action_name`, and `description_override`. Any other key (a stray `record_type`, `operations`, `filterable_fields`, …) is rejected at config-write — the shaping config lives on the Action, not the reference.
@@ -16,7 +16,7 @@ A toolset `actions[]` entry only accepts `action`, `action_name`, and `descripti
 - [Full authoring example](#full-authoring-example)
 - [Tool names (`action_name` / `description_override`)](#tool-names)
 - [Typed filter params (`filterable_fields`)](#typed-filter-params-filterable_fields)
-- [Hiding machinery + server-side defaults (`expose_*` / `default_*` / `agent_minimal`)](#hiding-machinery)
+- [Machinery params — hidden by default (`expose_*` / `default_*`)](#machinery-params--hidden-by-default)
 - [Curated write surface (`writable_fields`)](#curated-write-surface-writable_fields)
 - [Conditional writes (`precondition`)](#conditional-writes-precondition)
 - [Guarded + unguarded writes on one record_type](#guarded--unguarded-writes-on-one-record_type)
@@ -28,13 +28,22 @@ A toolset `actions[]` entry only accepts `action`, `action_name`, and `descripti
 
 **Step 1 — author the Actions.** One record_type + one operation each; the `id` becomes the agent-facing tool name.
 
+A `list` Action with no `filterable_fields` generates a tool with NO parameters at all
+(machinery is hidden by default) — right for a small catalog the agent reads whole, but
+if the tool is meant to filter, declare the fields:
+
 ```bash
 rekor actions upsert search_invoices --base my-ws --record_type invoices --operation list \
-  --description "Search invoices by customer, status, or date range"
+  --description "Find a customer's invoices, optionally narrowed by status" \
+  --config '{ "filterable_fields": [
+    { "field": "customer", "match": "exact" },
+    { "field": "status", "optional": true }
+  ] }'
 rekor actions upsert get_invoice   --base my-ws --record_type invoices --operation get
 rekor actions upsert create_payment --base my-ws --record_type payments --operation create
 rekor actions upsert get_payment    --base my-ws --record_type payments --operation get
-rekor actions upsert list_payments  --base my-ws --record_type payments --operation list
+rekor actions upsert list_payments  --base my-ws --record_type payments --operation list \
+  --description "List all payments"
 ```
 
 **Step 2 — compose the toolset by reference.** Use `--config` with full JSON (or `--config @toolset.json`) for advanced control:
@@ -117,21 +126,43 @@ So `{"field": "plan_name", "match": "text"}` exposes `plan_name_contains`, not `
 - **Native record_types only.** Like every non-`eq` match, `search` isn't forwardable to a proxy-backed source — such a call fails loudly rather than silently ignoring the filter.
 - **Rank is not existence — pick a `threshold` deliberately.** Everything above the cutoff is returned ranked, so a value that *doesn't exist* can still return a confident-looking near-match of something else. This bites hardest with `mode: name` on datasets sharing a prefix token (e.g. hundreds of plans all starting `AMIL`), where scores compress high and stop discriminating. If your workload needs "no match" to be a reliable signal, raise `threshold` for that field, or keep a `match: exact`/`text` param alongside for confirmation.
 
-Per field you may set `param` (rename the generated param **stem** — see the table above), `match` (`exact` | `range` | `text` | `any_of` | `member` | `search` — `any_of` accepts a list and matches any; `member` exposes an **array** field as a single membership value; `search` is the ranked match above), an optional `enum` (constrain the param to a fixed set so the agent can only pick a valid value), an optional `pattern` (a regex declaring the valid format of a structured string field — e.g. an id or code shape like `^pat-[0-9]+$` — so a placeholder such as `"null"`/`"undefined"` or any wrong format is rejected with an actionable error instead of silently matching nothing; applies to an exact/any_of/member match on a plain string field, and cannot be combined with `enum`), and `description`. An array field auto-exposes as a `member` param; object fields are rejected — expose a nested path (`address.city`) instead. The generic `filter` parameter stays on the tool as the escape hatch for anything the typed params cannot express (OR / nesting); typed params and `filter` are combined with AND.
+Per field you may set `param` (rename the generated param **stem** — see the table above), `match` (`exact` | `range` | `text` | `any_of` | `member` | `search` — `any_of` accepts a list and matches any; `member` exposes an **array** field as a single membership value; `search` is the ranked match above), an optional `enum` (constrain the param to a fixed set so the agent can only pick a valid value), an optional `pattern` (a regex declaring the valid format of a structured string field — e.g. an id or code shape like `^pat-[0-9]+$` — so a placeholder such as `"null"`/`"undefined"` or any wrong format is rejected with an actionable error instead of silently matching nothing; applies to an exact/any_of/member match on a plain string field, and cannot be combined with `enum`), `optional` (below), and `description`. An array field auto-exposes as a `member` param; object fields are rejected — expose a nested path (`address.city`) instead. The generic `filter` escape hatch (for OR / nesting) is **not** on the tool unless you set `expose_filter: true`; when it is, typed params and `filter` are combined with AND.
 
-## Hiding machinery
+### Required by default (`optional`)
 
-Read-shape knobs on a **`list`** Action. When the typed params cover everything an agent needs, set `"expose_filter": false` on the Action to drop the generic `filter` parameter entirely — keeping the agent-facing tool schema small. Server-side translation of the typed params is unaffected.
+A declared field **is** the tool's question, so its generated param is **required**. `"optional": true` opts one out:
+
+```json
+{ "filterable_fields": [
+  { "field": "patient_id", "match": "exact" },
+  { "field": "status", "match": "exact", "optional": true }
+] }
+```
+
+Why this direction: an optional parameter is one a weak model may fill with an invented placeholder (`null`, `none`, `sem_filtro`, `.*`). That compiles to a real condition matching zero rows, which reads as "nothing found" rather than an error — so the model retries with another guess instead of correcting, and can burn its whole iteration budget. Requiring the parameters that define the tool's question makes that failure unreachable.
+
+- A **range** field's two bounds (`_min`/`_max`, `_after`/`_before`) are always optional — `"optional": false` on a range is rejected at config-write.
+- A required param must carry a real value: blank or whitespace-only input counts as missing. On a **multi-select** (`any_of`) param an empty selection counts too — both the native `[]` and its JSON-encoded `"[]"` spelling — since either compiles to no condition at all. On a scalar param `"[]"` is just a value.
+- **Several optional filters on one tool is a design smell** — it usually means the tool answers more than one question. Split it into per-intent Actions (`find_patient_by_phone` + `search_patient_by_name`) rather than widening one.
+
+## Machinery params — hidden by default
+
+Read-shape knobs on a **`list`** Action. The five machinery params — `filter`, `sort`, `limit`, `offset`, `fields` — are **not** on a generated tool unless you ask for them, so its inputSchema is pure typed semantics. Server-side translation of the typed params is unaffected, and so is the underlying REST API; this is about what the *agent* sees.
+
+Opt one back in with `"expose_<param>": true`, and set the server-side value applied while a param stays hidden with `"default_sort"` / `"default_limit"` / `"default_fields"`:
 
 ```bash
 rekor actions upsert search_invoices --base my-ws --record_type invoices --operation list --config '{
-  "expose_filter": false,
   "default_limit": 50,
+  "default_fields": "external_id,data.status",
   "filterable_fields": [ { "field": "status" } ]
 }'
 ```
 
-The list tool's machinery params (`sort`, `limit`, `offset`, `fields`) can each be hidden the same way — `"expose_sort"`/`"expose_limit"`/`"expose_offset"`/`"expose_fields": false` — and given a server-side default (`"default_sort"`/`"default_limit"`/`"default_fields"`) that still applies when the param is hidden. `"default_fields"` takes the same shape as the `fields` param — a comma-separated string (`"external_id,data.name"`) or an array (`["external_id", "data.name"]`). A hidden `limit` surfaces a `"truncated"` flag in the response if it caps the result, so rows are never silently dropped. `"agent_minimal": true` is a preset that hides all of them (plus `filter`) with a generous default limit, leaving an inputSchema that is pure typed semantics; any explicit `expose_*`/`default_*` on the same Action overrides the preset.
+- `"default_fields"` takes the same shape as the `fields` param — a comma-separated string (`"external_id,data.name"`) or an array (`["external_id", "data.name"]`).
+- A hidden `limit` defaults to a generous page and surfaces a `"truncated"` flag in the response if it caps the result, so rows are never silently dropped. Set `"default_limit"` when you know the right page size, and `"default_fields"` to keep large records from filling the agent's context.
+- Expose a param only when the agent genuinely needs to drive it — an agent that paginates or sorts on purpose. `"expose_filter": true` restores the raw Filter-DSL escape hatch for OR / nesting the typed params can't express.
+- `"agent_minimal": true` named the old opt-in preset for this behavior. It is still accepted (existing config keeps working) but does nothing, since hiding is now the default — omit it in new Actions.
 
 ## Curated write surface (`writable_fields`)
 
@@ -222,7 +253,7 @@ rekor actions upsert place_order --base my-ws --config '{
 
 The generated `list` tools are lenient about how structured arguments arrive: `filter` is always a JSON-encoded Filter DSL string, while `sort` and any multi-value (`any_of`) parameter accept **either** the native array **or** a JSON-encoded string of it — so an agent that serializes array arguments as strings still works. (`sort` is the same JSON array of `{"field","direction"}` terms described in the Records section of SKILL.md.)
 
-Generated tool schemas are otherwise **closed**: an argument not declared by the tool's `inputSchema` is rejected with the unknown name, a likely correction when one exists, and the valid parameter list. This includes stale typed-filter names after a rename and machinery parameters hidden by `expose_*: false` or `agent_minimal`; they are never silently discarded into a broader call.
+Generated tool schemas are otherwise **closed**: an argument not declared by the tool's `inputSchema` is rejected with the unknown name, a likely correction when one exists, and the valid parameter list. This includes stale typed-filter names after a rename and machinery parameters that aren't exposed; they are never silently discarded into a broader call. A missing **required** filter param is rejected the same way, naming every missing parameter at once so one round trip carries the whole fix.
 
 ## Which base serves the toolset
 

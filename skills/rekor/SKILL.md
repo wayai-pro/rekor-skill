@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.61.0
+version: 1.62.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -120,6 +120,7 @@ Route any request to the right feature, then jump to that section of the command
 | See who changed what, and when | `history` subcommands (admin-gated) | Records |
 | Decide native vs proxy vs mirror backing | the pattern catalog | Integration Modeling |
 | Shape schemas/tools so agents succeed | principles + recipes | Modeling Principles |
+| Design an agent-facing tool surface | tool design principles (intent tools, required params, closed sets) | Modeling Principles |
 
 ## Where to Find More Detail
 
@@ -129,7 +130,7 @@ The bundled `references/` files carry the full option grammar — read the match
 |---|---|---|
 | `references/querying.md` | Writing non-trivial SQL, tuning `search`, setting timezones | SQL example gallery (arrays, `ARRAY JOIN`, CTEs, `--param`, fuzzy ranking), `x-search` modes/threshold, datetime & timezone configuration |
 | `references/external-sources.md` | Configuring any external source | Full source grammar: `field_mapping` rules (value maps, transforms, split/destructure/computed, per-op overrides), per-op endpoints, named write bindings, `id_path` variants, `forward_filters`, `local_filters`, body shaping, `{{current.*}}`/`{{prior.*}}`, caching/signing/timeout/breaker, SSRF rules, a worked legacy-upstream example |
-| `references/mcp-factory.md` | Authoring Actions or toolsets beyond the defaults | Full Action + toolset grammar: `filterable_fields`, `expose_*`/`default_*`/`agent_minimal`, `writable_fields`, `precondition`, `binding`, composite Actions, tool naming, which base serves a toolset slug |
+| `references/mcp-factory.md` | Authoring Actions or toolsets beyond the defaults | Full Action + toolset grammar: `filterable_fields` (incl. `optional`), `expose_*`/`default_*`, `writable_fields`, `precondition`, `binding`, composite Actions, tool naming, which base serves a toolset slug |
 | `references/executors.md` | Building or deploying an executor | The `rekor-sdk` contract (verify, dedupe, error envelope), signed write-back, where to host, the vault certificate pull pattern, local dev, retries |
 | `references/providers.md` | Importing/exporting provider tool definitions | Exact `rekor providers` command forms per provider (OpenAI/Anthropic/Google/MCP) |
 
@@ -818,8 +819,8 @@ rekor toolsets delete invoicing-agent --base my-ws
 **Advanced control** lives on the first-class **Actions** a toolset references. Author an Action with the shaping config — `rekor actions upsert <id> --record_type X --operation Y --config '{…}'` (one record_type + one op) — then reference it from the toolset (`--action <id>`, or an `actions: [{ action, action_name?, description_override? }]` entry in the toolset `--config`). The per-Action knobs, one line each (full grammar + JSON examples in **`references/mcp-factory.md`**):
 
 - **tool name** — the Action `id` is the agent-facing tool name; a toolset reference can rename it per-surface with `action_name` or replace its description with `description_override`. Names must be unique across the toolset. (Relationship tools, declared inline on the toolset, keep the `name`/`names` map.)
-- **`filterable_fields`** — expose chosen fields of a `list` Action as typed params (native arguments instead of a raw filter). Per field: `param`, `match` (`exact`/`range`/`text`/`any_of`/`member`/`search`), `enum`, `pattern`, `description`. `param` is a **stem**, not always the final param name: `text` → `<param>_contains`, `range` → `<param>_min`/`_max` (`_after`/`_before` for dates), `search` → `<param>_search`; `exact`/`any_of`/`member` use it verbatim. `match: search` is the only match that reaches the ranked `search` operator (and a field's `x-search` tuning) — see `references/mcp-factory.md`.
-- **`expose_*: false` + `default_*`** — hide a `list` Action's machinery params (`filter`/`sort`/`limit`/`offset`/`fields`) and set server-side defaults; `agent_minimal: true` hides them all at once.
+- **`filterable_fields`** — expose chosen fields of a `list` Action as typed params (native arguments instead of a raw filter). Per field: `param`, `match` (`exact`/`range`/`text`/`any_of`/`member`/`search`), `enum`, `pattern`, `optional`, `description`. A declared field is **required** by default (it's the tool's question) — `optional: true` opts out, and a range's two bounds are always optional. `param` is a **stem**, not always the final param name: `text` → `<param>_contains`, `range` → `<param>_min`/`_max` (`_after`/`_before` for dates), `search` → `<param>_search`; `exact`/`any_of`/`member` use it verbatim. `match: search` is the only match that reaches the ranked `search` operator (and a field's `x-search` tuning) — see `references/mcp-factory.md`.
+- **`expose_*` + `default_*`** — a `list` Action's machinery params (`filter`/`sort`/`limit`/`offset`/`fields`) are **hidden by default**, so the tool is pure semantics. `expose_<param>: true` opts one back in; `default_*` sets the server-side value applied while a param stays hidden (a hidden `limit` defaults to a generous page).
 - **`writable_fields`** — the write-side mirror on a `create`/`update` Action: an allowlist of exactly the fields it may set (least-privilege intent tools) that also generates a rich typed `data` schema from the record_type schema.
 - **`precondition`** — a Filter DSL compare-and-set on a `create`/`update` Action, checked against the record's current state; a miss is a 409 and nothing changes. Invisible to the agent — turns a fragile read-then-write into one race-free call (e.g. `book_slot` only if the slot is still `free`).
 - **`binding`** — pick which **named write binding** of a proxy source's op a write Action dispatches to (see External Sources), keeping one canonical record_type whose writes fan out to several endpoints.
@@ -975,7 +976,7 @@ The command reference above is the *mechanics*. This is how to **combine** them 
 
 1. **One intent = one atomic write.** An action that takes N separate writes is N chances to drop one and leave the system half-updated. Collapse a single user intent into a single write; when one intent genuinely spans multiple records, use `rekor batch` so they all commit or all roll back.
 2. **State lives on the entity — don't duplicate it.** Keep each piece of state in exactly one place, on the entity it describes. Mirroring a status onto a second record forces the agent to update both in sync, recreating the multi-write problem. Link or query the source of truth instead of copying its fields.
-3. **Expose the job, nothing more.** An agent-facing tool should express the task and nothing else. Push machinery — sort, limit, offset, field selection, the raw filter DSL — into toolset config with `expose_*: false` plus server-side `default_*` (or the `agent_minimal` preset). The agent fills meaning via typed `filterable_fields` on reads and `writable_fields` on writes (the tool sees only the fields its job sets), not plumbing.
+3. **Expose the job, nothing more.** An agent-facing tool should express the task and nothing else. Generated tools already hide the machinery (sort, limit, offset, field selection, the raw filter DSL) — see **Tool design principles** below for what that means for how you author Actions. The agent fills meaning via typed `filterable_fields` on reads and `writable_fields` on writes (the tool sees only the fields its job sets), not plumbing.
 4. **Guards belong in config, not arguments.** Enforce invariants server-side where the agent can't forget them, not as instructions it must follow. A `precondition` makes a state-dependent write race-free and invisible to the agent; schema `required` + enums reject malformed input. The rejection message is the recovery channel — keep it legible and actionable so the agent self-corrects.
 5. **Narrow the input space.** Every degree of freedom is a way to get it wrong. Constrain with enums (a closed set to pick from), typed `filterable_fields` (native params instead of free-form filter strings), stable `external_id` keys (idempotent upsert, no invented ids), and `x-fk` on writes (a reference must resolve to a real record).
 6. **Model for the fallible agent, not the ideal one.** Agents skip steps, send empty strings for fields they didn't fill, and invent ids. `required` rejects the missing field, enums reject the made-up value, `x-fk` rejects the invented reference, `precondition` rejects the out-of-order write — each turns a silent corruption into a clear, correctable error.
@@ -983,20 +984,34 @@ The command reference above is the *mechanics*. This is how to **combine** them 
 
 **Also:** keep data **canonical and self-describing** — declare datetime fields `format: date-time` and set the record_type's `x-timezone` so every value carries its offset, and prefer readable enums over opaque codes, so a record can be reasoned about without outside context. And **optimize the common path deliberately** — make the single most frequent action one well-named tool call, accepting more friction on the rare one.
 
+### Tool design principles
+
+How to shape the tools an agent actually calls. Rekor's defaults already implement these — the failure mode is *widening* a tool back out, so each rule below is about what not to add. The cost of a loose surface is paid by the weakest model that will ever hold the token: an optional parameter is one it may fill with an invented placeholder (`null`, `none`, `sem_filtro`, `.*`), which compiles to a real filter that matches nothing, reads as "no results" rather than an error, and drives a retry loop.
+
+1. **A tool is an intent, not an endpoint.** Name it for the job (`find_patient_by_phone`, `book_appointment`), and let it answer exactly one question. Two ways to look something up = two Actions, not one tool with two optional filters.
+2. **Machinery stays hidden.** `filter`, `sort`, `limit`, `offset`, `fields` are off by default; the tool's inputSchema is pure semantics. Opt one back in with `expose_<param>: true` only when the agent genuinely needs to drive it, and set `default_limit` / `default_fields` instead so the server decides.
+3. **Declared parameters are required; optionality is a choice you defend.** A `filterable_fields` entry is the tool's question, so it's required by default. Add `optional: true` for a genuine narrowing filter — and if a tool accumulates several, that's the signal to split it by intent instead. (Range fields are always optional: their two bounds can't be mandatory.)
+4. **Every discrete string parameter gets a closed shape.** An `enum` (pick from a set — best declared on the record_type schema so writes validate too) or a `pattern` (one valid format, e.g. `^\+[1-9][0-9]{6,14}$`). An unconstrained optional string filter is where invented values come from.
+5. **What the agent shouldn't decide is injected server-side.** A `precondition` guards a state-dependent write invisibly; `writable_fields` bounds what a write may touch; `external_source` / `bindings` route it. None of these are agent-facing parameters.
+6. **Rejections teach the next move.** The error message is the recovery channel (MCP clients drop `error.details`), so it must name the parameter and the fix. This is why a bad value must fail loudly rather than compile into a filter that returns zero rows.
+
+**Counter-rule:** split by *intent*, never by combinatorics. Three clearly-named tools beat one five-parameter tool; fifteen near-identical variants are worse than either, because tool selection degrades too.
+
 ### Recipes: principle → the feature that realizes it
 
 The principles above are agent-layer and backend-neutral; these are the specific toolset knobs that implement them — the lookup from intent to implementation. Each knob is detailed in the toolset section above.
 
 - **One tool = one intent; curate the surface** — distinct `names` per operation (`names: { "list": "search_invoices" }`), even two tools on one record_type; a curated `filterable_fields` list.
-- **Hide machinery (filter / sort / limit / offset / fields)** — `expose_*: false` per param (plus a server-side `default_*`), or the `agent_minimal` preset that hides them all at once.
-- **Constrain a closed set** — `filterable_fields[].enum`.
+- **Machinery (filter / sort / limit / offset / fields)** — hidden by default; `expose_<param>: true` opts one back in, `default_*` sets the server-side value applied while it stays hidden.
+- **Make a filter optional** — `filterable_fields[].optional: true` (declared fields are required by default; a `range` field's bounds already are optional, and `optional: false` on one is rejected).
+- **Constrain a closed set** — `filterable_fields[].enum`, or an `enum` on the record_type schema field (preferred — writes validate against it too, and the filter param derives it).
 - **Constrain a structured id or code** — `filterable_fields[].pattern` (e.g. `^pat-[0-9]+$`); published to the tool schema and enforced at runtime.
-- **Require a non-empty value** — automatic: discrete pick-a-value params reject empty and whitespace-only input (a placeholder like `""` is rejected, not silently matched).
+- **Require a value at all** — automatic: a declared `filterable_fields` entry is required unless marked `optional: true` (a `range` field's two bounds are always optional), and a required param rejects blank / empty-selection input (the model can't fake compliance with `""` or `[]`).
 - **Fail loud + actionable, never silent** — `x-fk` on write fields; the empty / `enum` / `pattern` rejections on read params (read/write parity).
 - **Make a state-dependent write atomic + race-free** — a `create`/`update` tool with a `precondition` (compare-and-set; invisible to the agent; 409 on conflict).
 - **Nudge the agent toward the right value** — `filterable_fields[].description`: name the field's kind, source, and when to use it; use placeholder shapes, never real data values.
 
-**One gotcha:** an `enum` invites the agent to *pick* a value — right for a field it should always fill, wrong for an optional, usually-omitted one (a fixed set nudges it to choose rather than skip). For an optional filter, prefer a `pattern` (or a plain free param) so omitting it stays the natural default.
+**One gotcha:** an `enum` invites the agent to *pick* a value — right for a required parameter it should always fill, wrong for an `optional: true` one it should usually skip (a fixed set nudges it to choose rather than omit). On an optional filter prefer a `pattern` (or a plain free param); better still, if the field deserves an enum, ask whether it's really the tool's intent and should be required.
 
 ## Best Practices
 
