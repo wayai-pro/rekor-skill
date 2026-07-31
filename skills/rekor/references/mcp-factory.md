@@ -140,7 +140,7 @@ A declared field **is** the tool's question, so its generated param is **require
 ] }
 ```
 
-Why this direction: an optional parameter is one a weak model may fill with an invented placeholder (`null`, `none`, `sem_filtro`, `.*`). That compiles to a real condition matching zero rows, which reads as "nothing found" rather than an error — so the model retries with another guess instead of correcting, and can burn its whole iteration budget. Requiring the parameters that define the tool's question makes that failure unreachable.
+Why this direction: an optional parameter is one a weak model may fill with an invented placeholder (`null`, `none`, `sem_filtro`, `.*`). That compiles to a real condition matching zero rows — which, without the recovery hint below, reads as "nothing found" rather than an error, so the model retries with another guess instead of correcting, and can burn its whole iteration budget. Requiring the parameters that define the tool's question makes that failure unreachable.
 
 - A **range** field's two bounds (`_min`/`_max`, `_after`/`_before`) are always optional — `"optional": false` on a range is rejected at config-write.
 - A required param must carry a real value: blank or whitespace-only input counts as missing. On a **multi-select** (`any_of`) param an empty selection counts too — both the native `[]` and its JSON-encoded `"[]"` spelling — since either compiles to no condition at all. On a scalar param `"[]"` is just a value.
@@ -162,6 +162,7 @@ rekor actions upsert search_invoices --base my-ws --record_type invoices --opera
 
 - `"default_fields"` takes the same shape as the `fields` param — a comma-separated string (`"external_id,data.name"`) or an array (`["external_id", "data.name"]`).
 - A hidden `limit` defaults to a generous page and surfaces a `"truncated"` flag in the response if it caps the result, so rows are never silently dropped. Set `"default_limit"` when you know the right page size, and `"default_fields"` to keep large records from filling the agent's context.
+- An **empty result** where the agent itself narrowed the search carries an `"empty_result_hint"` naming the parameters it supplied (names only, never values) with the recovery that actually works: verify the value for a required parameter, drop it for an optional one, simplify a raw `filter`. This is what breaks the guess → zero rows → guess-again retry loop — zero rows used to read as "nothing found" with no cause. An empty page the agent did NOT cause gets no hint: no filters supplied, only a `base_filter` it can't see, or a page past the last row (its filters already returned rows, so nothing about them is in question).
 - Expose a param only when the agent genuinely needs to drive it — an agent that paginates or sorts on purpose. `"expose_filter": true` restores the raw Filter-DSL escape hatch for OR / nesting the typed params can't express.
 - `"agent_minimal": true` named the old opt-in preset for this behavior. It is still accepted (existing config keeps working) but does nothing, since hiding is now the default — omit it in new Actions.
 
