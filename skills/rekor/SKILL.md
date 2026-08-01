@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.65.0
+version: 1.65.1
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -916,7 +916,7 @@ The CLI checks for newer published versions of both in the background and prints
 
 ### Reporting
 
-File a bug or issue to the Rekor team, then follow it through to a fix. Reports are deduplicated, so re-filing the same problem merges into the existing one rather than spamming.
+File a bug or issue to the Rekor team, then follow it through to a fix. Reports are deduplicated: a repeat while work is pending merges into the existing report; the original reporter re-filing a resolved or non-finally-dismissed human report reopens it for another look unless its lifetime re-adjudication cap is exhausted.
 
 **If an update notice is showing** (see [Staying up to date](#staying-up-to-date)), update and re-check before filing — the bug may already be fixed in a newer CLI or skill.
 
@@ -933,7 +933,7 @@ rekor report accept <report_id>           # the shipped fix works → resolved
 rekor report contest <report_id> --reason "still reproduces because ..."   # the fix didn't work, or a dismissal is wrong → back to the team
 ```
 
-**The verification loop.** After the team escalates and a fix ships, your report moves to `shipped` — you'll get an email, and `rekor login`/`rekor status` remind you once (or find it by title with `rekor report list --status shipped`). Read `rekor report get <id>` (the original title and description, current status, and the team's note), then `accept` if it works or `contest --reason "..."` if it doesn't. You can also `contest` a `dismissed` report you believe is real — it routes back to the team. Contests are bounded (a cap, and the team may mark a dismissal final); past those, contact support. You can only list/read/act on human-filed reports **you** filed; agent-authored reports stay in the admin triage queue.
+**The defect verification loop.** After the team escalates a defect and a fix ships, your report moves to `shipped` — you'll get an email, and `rekor login`/`rekor status` remind you once (or find it by title with `rekor report list --status shipped`). Read `rekor report get <id>` (the original title and description, current status, and the team's note), then `accept` if it works or `contest --reason "..."` if it doesn't. Enhancements move directly to `addressed` when their issue closes because there is no defect fix to verify. You can also `contest` a `dismissed` report you believe is real — it routes back to the team. Contests are bounded (a cap, and the team may mark a dismissal final); past those, contact support. You can only list/read/act on human-filed reports **you** filed; agent-authored reports stay in the admin triage queue.
 
 ---
 
