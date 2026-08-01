@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.64.0
+version: 1.65.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -460,7 +460,7 @@ Every field is searchable by default — `search` needs no setup. Exact filters 
 
 **Cancellation & archival.** Records are **updatable by default** — re-upserting the same `external_id` updates the existing record in place (idempotent upsert), and you can advance state freely (e.g. `scheduled → confirmed`). A record_type can opt into stricter archival via its schema's `x-archival.mode`: `immutable` (write-once — any update is rejected) or `on_attribute` (updatable until a configured terminal value). A record can also be *cancelled* — a first-class state distinct from delete — via MCP (`manage_record` `cancel`) or REST (`POST .../records/<record_type>/<id>/cancel`); there is no CLI `cancel` subcommand. A cancelled record can no longer be updated. Records may also be *archived* automatically (when they reach a terminal/immutable state, or after a long period of inactivity). An archived record stays readable and can still be cancelled, but it can't be deleted, and re-upserting by the same `external_id` creates a **new** record rather than updating the archived one. **List queries return active records by default** — archived records are excluded from `rekor records list` / `rekor relationships list`, the query tools, and record traversal. To query archived records through a list, add a filter condition on `archived` (e.g. `{"field":"archived","op":"eq","value":true}`) — your condition then decides which tier you see. Record traversal has no filter override — archived links are reachable only via raw SQL. Raw `rekor sql` applies no default: add `archived = false` yourself for active-only results (cancelled rows carry `cancelled = true`).
 
-**Referential integrity (foreign keys).** A field can be declared a **foreign key** into another record_type by adding an `x-fk` hint to that field in the schema. Every write then checks the value points at a real record — a missing reference is rejected with an actionable error instead of landing as silent bad data.
+**Referential integrity (foreign keys).** A **top-level** field can be declared a **foreign key** into another record_type by adding an `x-fk` hint to that field in the schema. Every write then checks the value points at a real record — a missing reference is rejected with an actionable error instead of landing as silent bad data. The probe reads one level deep, so an `x-fk` on a *nested* field (`insurance.plan_id`) is inert: it is accepted at config-write and never enforced. Hoist the reference to a top-level field.
 
 ```jsonc
 "patient_id":      { "type": "string", "x-fk": { "record_type": "patients" } },                 // matches patients by external_id (default)
@@ -1010,6 +1010,7 @@ The principles above are agent-layer and backend-neutral; these are the specific
 - **Require a value at all** — automatic: a declared `filterable_fields` entry is required unless marked `optional: true` (a `range` field's two bounds are always optional), and a required param rejects blank / empty-selection input (the model can't fake compliance with `""` or `[]`).
 - **Fail loud + actionable, never silent** — `x-fk` on write fields; the empty / `enum` / `pattern` rejections on read params (read/write parity).
 - **Scope a tool to a subset without an agent-facing filter** — `base_filter` on a `list` Action (invisible, always applied).
+- **Check a tool surface against these principles** — `rekor push` prints advisory tool-design warnings (every filter required, several optional filters on one tool, an unconstrained string filter, the raw `filter` escape hatch left open alongside typed params). Advisory only: they never block a push.
 - **Make a state-dependent write atomic + race-free** — a `create`/`update` tool with a `precondition` (compare-and-set; invisible to the agent; 409 on conflict).
 - **Nudge the agent toward the right value** — `filterable_fields[].description`: name the field's kind, source, and when to use it; use placeholder shapes, never real data values.
 

@@ -22,6 +22,7 @@ A toolset `actions[]` entry only accepts `action`, `action_name`, and `descripti
 - [Conditional writes (`precondition`)](#conditional-writes-precondition)
 - [Guarded + unguarded writes on one record_type](#guarded--unguarded-writes-on-one-record_type)
 - [Selecting a named write binding (`binding`)](#selecting-a-named-write-binding-binding)
+- [Tool-design warnings at push](#tool-design-warnings-at-push)
 - [Lenient list-tool arguments](#lenient-list-tool-arguments)
 - [Which base serves the toolset](#which-base-serves-the-toolset)
 
@@ -37,7 +38,7 @@ if the tool is meant to filter, declare the fields:
 rekor actions upsert search_invoices --base my-ws --record_type invoices --operation list \
   --description "Find a customer's invoices, optionally narrowed by status" \
   --config '{ "filterable_fields": [
-    { "field": "customer", "match": "exact" },
+    { "field": "customer_id", "match": "exact" },
     { "field": "status", "optional": true }
   ] }'
 rekor actions upsert get_invoice   --base my-ws --record_type invoices --operation get
@@ -46,6 +47,8 @@ rekor actions upsert get_payment    --base my-ws --record_type payments --operat
 rekor actions upsert list_payments  --base my-ws --record_type payments --operation list \
   --description "List all payments"
 ```
+
+`search_invoices` is shaped the way [the push-time warnings](#tool-design-warnings-at-push) want: `customer_id` is the tool's question so it stays required, and it takes an exact match safely because the invoices schema declares it `x-fk` into `customers` — a made-up id is rejected by the foreign-key probe rather than silently matching nothing. `status` is a genuine narrowing filter, so it is marked `optional`. An exact-match string with neither a closed set nor a foreign key behind it is the shape to avoid.
 
 **Step 2 — compose the toolset by reference.** Use `--config` with full JSON (or `--config @toolset.json`) for advanced control:
 
@@ -93,9 +96,9 @@ A read-shape knob on a **`list`** Action. Expose chosen fields of a record_type 
 ```bash
 rekor actions upsert search_invoices --base my-ws --record_type invoices --operation list --config '{
   "filterable_fields": [
-    { "field": "status" },
-    { "field": "issued_at" },
-    { "field": "customer", "match": "text" }
+    { "field": "customer", "match": "text" },
+    { "field": "status", "optional": true },
+    { "field": "issued_at" }
   ]
 }'
 ```
@@ -190,7 +193,7 @@ A read-shape knob on a **`list`** Action. `base_filter` is a Filter-DSL expressi
 ```bash
 rekor actions upsert list_active_practitioners --base my-ws --record_type practitioners --operation list --config '{
   "base_filter": { "field": "data.status", "op": "eq", "value": "active" },
-  "filterable_fields": [ { "field": "specialty", "match": "exact" } ]
+  "filterable_fields": [ { "field": "specialty", "match": "exact", "enum": ["cardiology", "dermatology", "pediatrics"] } ]
 }'
 ```
 
@@ -277,6 +280,19 @@ rekor actions upsert place_order --base my-ws --config '{
 
 - Reference it from a toolset like any Action (`--action place_order`, or an `actions: [{ "action": "place_order" }]` entry). The generated tool takes one input object per step key — record steps take `data` (+ `external_id` for an idempotent upsert, or `id` for delete); relationship steps take `source_record_type`/`target_record_type` plus, per endpoint, exactly one of the internal id (`source_id`/`target_id`) or the external key (`source_external_id`/`target_external_id`, with optional `source_external_source`/`target_external_source`), an optional relationship-level `external_id`/`external_source` (the link's own key — makes a re-run of the whole action idempotent for that step) — and `id` for delete. The agent never sees the preconditions — they're injected server-side.
 - Cross-step references work through external ids: set an `external_id` on a create step and address the link step's endpoint with `source_external_id`/`target_external_id` — steps run in order inside one transaction, so the link resolves the record the same action just created. (Referencing a same-action record by its *server-assigned* id remains impossible — the id doesn't exist until the step runs.) External addressing requires the record to exist by the time the link step runs; a miss rejects the whole action.
+
+## Tool-design warnings at push
+
+`rekor push` lints the `list` Actions in your config against the principles above and prints any suggestions to stderr. They are **advisory** — a rule encodes a heuristic about how a model behaves, and a heuristic that failed your push would be worse than the shape it objects to. Config validity is separate and still fails loudly.
+
+| Rule | What it catches |
+|---|---|
+| `all-filters-required` | Every **value** filter is required and there is more than one, so the agent must supply all of them on every call. Usually means narrowing filters need `"optional": true`, or the Action is several intents fused together. This is the shape a config authored *before* required-by-default lands in. A `range` field is ignored here too, so declaring a date window neither triggers the rule nor silences it. |
+| `many-optional-filters` | More than two optional filter **params** on one tool — each is a parameter a weaker model may fill with an invented value. A `range` field's two bounds don't count: they are optional by construction, so an anchor plus a date window stays clean. |
+| `unconstrained-string-filter` | A value-picking string param with no `enum` and no `pattern`, so a made-up value compiles to a real condition that matches nothing. **Top-level** `x-fk` fields are exempt: their valid values are whatever rows exist in the target record_type, and the foreign-key probe already rejects a bad one. A *nested* `x-fk` (`insurance.plan_id`) is still flagged — the write-time probe only reads one level deep, so a nested annotation is inert config with nothing enforcing it. |
+| `filter-escape-hatch` | `expose_filter` enabled alongside declared filter fields — the agent can bypass them with a raw expression, which is the untyped surface the typed params exist to replace. Fires on any truthy value, since `expose_filter: yes` is a *string* in YAML and still opens the hatch. |
+
+Warnings appear on `rekor push`, on `--dry-run`, and on a push with no changes — that last case matters, because a config written before these rules existed is exactly the one that never diffs again.
 
 ## Lenient list-tool arguments
 
