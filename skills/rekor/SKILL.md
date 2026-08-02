@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.65.1
+version: 1.66.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -47,10 +47,10 @@ Organization                      ← account boundary; members, API tokens, vau
     │     · triggers · inbound webhooks · Actions · toolsets · seed fixture definitions
     └── DATA — read/write on ANY base, production included:
           records · relationships · files · attachments · batch writes
-          (one exception: seed apply/reset/clear run only on previews)
+          (seed apply/reset/clear and seed lease acquire/release run only on previews)
 ```
 
-**The one rule that routes every command:** config writes are rejected on a production base — make them in a **preview** (`rekor bases create-preview`), then have the user run `rekor bases promote`. Data writes work anywhere. If a write unexpectedly fails with a preview/403 error, you attempted a config write on production.
+**The one rule that routes every command:** config writes are rejected on a production base — make them in a **preview** (`rekor bases create-preview`), then have the user run `rekor bases promote`. Ordinary data writes work anywhere; seed fixture and seed lease data operations are preview-only. If a write unexpectedly fails with a preview/403 error, check whether it is config or eval-state work on production.
 
 ### Every primitive, one line each
 
@@ -75,7 +75,7 @@ Two schema→instance pairs anchor the model: **record type → record** and **r
 | **Signing v1** | The HMAC request signature on trigger deliveries, executor-bound source calls (opt-in `signing`), and inbound-webhook verification (the default scheme) — one wire format, both directions; `rekor-sdk` implements it, never hand-roll | Executors, Inbound Webhooks |
 | **Action** | One record type + one operation, shaped and guarded (`filterable_fields`, `writable_fields`, `precondition`, `binding`) — or a **composite** of atomic multi-record steps. Its id is the agent-facing tool name | `rekor actions` |
 | **Toolset** | A curated MCP server composed of Action references (plus relationship/batch/SQL tools), served at `mcp.rekor.pro/t/<slug>/mcp` | `rekor toolsets` |
-| **Seed fixture** | Named, reversible records+relationships baseline for hermetic agent evals. The definition is config; `apply`/`reset`/`clear` are preview-only data operations | `rekor seed` |
+| **Seed fixture / lease** | Named, reversible records+relationships baseline for hermetic agent evals. Definitions are config; `apply`/`reset`/`clear` are preview-only data operations. An actor-bound lease exclusively resets, owns, and clears fixture state for one eval run | `rekor seed`, `rekor seed lease` |
 | **API token** | `rec_…` credential: grant-scoped (bases × record_types × environments × permissions) or **toolset-bound** (its authorization IS one toolset's tool surface) | `rekor tokens` |
 | **Secret** | Org-level encrypted credential (string or file blob), referenced from source/trigger config as `vault:<name>`, pullable by executors at dispatch | `rekor secrets` |
 | **Template** | Ready-made config-as-code data layer (record types, relationship types, Actions, toolsets) you `pull`, `push`, and promote | `rekor template` |
@@ -765,6 +765,33 @@ rekor seed clear demo --base <preview>   # delete every row the fixture owns (te
 rekor seed list --base <preview>         # show the fixtures defined on the base
 ```
 
+For concurrent or outcome-unknown eval runs, use an actor-bound **seed lease** instead of calling
+`reset` and `clear` separately. Generate a fresh UUIDv7 once and persist the immutable tuple until
+release; `owner_ref` is only a safe run label and never grants authority. It must be 1–200
+characters, start with a letter or digit, and otherwise use only letters, digits, or `._:@/+~=-`
+(no whitespace).
+
+```bash
+rekor seed lease acquire demo --base <preview> \
+  --lease-id <uuidv7> --owner-ref <safe-run-id>
+rekor seed lease status --base <preview> --lease-id <uuidv7>
+rekor seed lease release demo --base <preview> \
+  --lease-id <uuidv7> --owner-ref <safe-run-id>
+```
+
+Acquire atomically resets the fixture and locks the entire preview's fixture-data operations;
+release atomically clears the fixture-owned data and unlocks it. Only the same verified user or
+Rekor token may retry, inspect, or release the tuple. Exact retries are no-ops, released IDs are
+never reusable, and another authorized actor learns only that the base is locked. If an acquire
+times out with an unknown outcome, retry the **same** tuple. The permanent ledger is capped at 1,000
+IDs per preview (warnings begin at 800 and 950); replace the disposable preview when exhausted.
+
+REST equivalents are `POST /v1/{base_id}/seed-leases/acquire`, `POST
+/v1/{base_id}/seed-leases/release`, and `GET
+/v1/{base_id}/seed-leases/status[?lease_id=…]`, all requiring a combined base-scoped
+`write:seeds` grant. The first acquire/reset and first release/clear transition cost one flat op
+each; status, conflicts, exact retries, and repeated releases cost zero.
+
 Rules and guarantees:
 - **Idempotent by `external_id`.** `apply` upserts each record by its `external_id`, so re-applying **updates in place and never creates a duplicate** — no twin records, even if a record already existed.
 - **`reset` restores the baseline.** It re-applies the declared records in place (fixing any a run mutated — e.g. a status a trigger flipped) and removes fixture-owned rows the fixture no longer declares. Use `reset` between eval runs for a guaranteed-clean start.
@@ -773,6 +800,7 @@ Rules and guarantees:
 - **Preview-only.** `apply`/`reset`/`clear` run only on a preview base (like schema changes); they refuse production. The fixture definition promotes with the base like any other config, but the data ops stay preview-scoped.
 - **No trigger side-effects.** Applying/resetting a fixture is baseline setup — it does **not** fire triggers, so restoring data can't cascade.
 - **API-addressable.** The three verbs are reachable over the REST API by fixture name, so a cloud eval harness holding a token scoped to `write:seeds` on the one preview base can reset the data itself.
+- **Leases globally lock fixture data operations.** While any seed lease is active, ordinary `apply`, `reset`, and `clear` calls for every fixture return `FIXTURE_TARGET_IN_USE`; fixture-definition config CRUD remains available.
 
 ### Provider Adapters
 
