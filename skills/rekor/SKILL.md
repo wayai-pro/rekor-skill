@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.66.0
+version: 1.67.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -854,13 +854,29 @@ rekor toolsets delete invoicing-agent --base my-ws
 - **`precondition`** — a Filter DSL compare-and-set on a `create`/`update` Action, checked against the record's current state; a miss is a 409 and nothing changes. Invisible to the agent — turns a fragile read-then-write into one race-free call (e.g. `book_slot` only if the slot is still `free`).
 - **`binding`** — pick which **named write binding** of a proxy source's op a write Action dispatches to (see External Sources), keeping one canonical record_type whose writes fan out to several endpoints.
 
-Connect agents to the toolset URL with a token scoped to exactly one base. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts. For least-privilege, mint a token bound to the toolset in one step: `rekor tokens create-for-toolset <slug> --base <db>` (or pass `--mint-token` to `rekor toolsets upsert`). A toolset-bound token's authorization IS the toolset's tool surface — exactly those record_types and operations, relationships, batch, and SQL only if you enabled it, nothing else — so a leaked token can't reach beyond the tools you exposed, and you can rotate or revoke one per agent.
+Connect agents to the toolset URL with a token scoped to exactly one base. The agent sees only the tools you configured — fully domain-specific, no Rekor concepts. For least-privilege, mint a token bound to the toolset in one step: `rekor tokens create-for-toolset <slug> --base <db>`. A toolset-bound token's authorization IS the toolset's tool surface — exactly those record_types and operations, relationships, batch, and SQL only if you enabled it, nothing else — so a leaked token can't reach beyond the tools you exposed, and you can rotate or revoke one per agent. For interactive setup, `rekor toolsets upsert --mint-token` also creates one, but its combined toolset-and-token output is not an automated credential-capture path.
+
+For automated setup, run `rekor tokens create-for-toolset <slug> --base <db> --token-only`; see **API Tokens** below for the fail-closed capture recipe and JSON response shape.
 
 Toolsets can only be created/modified in preview bases. Promote to production when ready; promotion is blocked if it would break a published toolset (a removed record_type/rel-type, or a field its typed filters/`writable_fields`/`base_filter`/`precondition`/`bindings` depend on) — a dry run lists conflicts first. `mcp.rekor.pro/t/{slug}/mcp` resolves the toolset from the base your **token** is scoped to, so connect with a production token for the promoted toolset or a preview-base token to sandbox-test the not-yet-promoted one (`references/mcp-factory.md` covers the resolution rules).
 
 ### API Tokens
 
-Create scoped tokens for agents, integrations, and CI/CD. Tokens can be restricted to specific bases, record_types, environments, and permissions. Tokens are hashed before storage — the raw value is shown only once on creation.
+Create scoped tokens for agents, integrations, and CI/CD. Tokens can be restricted to specific bases, record_types, environments, and permissions. Tokens are hashed before storage — the raw value is shown only once on creation. Use `--token-only` when a script needs the secret; with `--json`, the unwrapped secret field is `.token`, not `.data.token`.
+
+For automation, prefer `--token-only`: it validates the token shape and emits only the one-time secret, with no table, JSON, or MCP URL around it. Capture it without printing it or enabling shell tracing:
+
+```bash
+TOKEN="$(rekor tokens create-for-toolset <slug> --base <db> --token-only)"
+case "$TOKEN" in rec_*) ;; *) echo "Token creation failed" >&2; exit 1 ;; esac
+```
+
+If a workflow must consume `--json`, Rekor CLI responses are already unwrapped: extract top-level `.token`, **never `.data.token`**, and fail closed rather than accepting `null`:
+
+```bash
+TOKEN="$(rekor tokens create-for-toolset <slug> --base <db> --json \
+  | jq -er '.token | strings | select(startswith("rec_"))')"
+```
 
 **Mint probe/test/diagnostic tokens with `--ttl`** so they expire on their own — a disposable token never needs a manual revoke or cleanup. Use `--description` to record what holds a token (which service, credential, or pipeline), so future you knows what breaks if it's revoked.
 
@@ -871,6 +887,10 @@ rekor tokens create --name "my-key" --grants '[{"scope":{"bases":["*"]},"permiss
 # Create a scoped token (read-only on one base)
 rekor tokens create --name "client-a-reader" \
   --grants '[{"scope":{"bases":["client-a"],"environments":["production"]},"permissions":["read:records","read:record_types"]}]'
+
+# Capture the one-time secret for automation (validates rec_ and prints nothing else)
+TOKEN="$(rekor tokens create --name "client-a-reader" --token-only \
+  --grants '[{"scope":{"bases":["client-a"]},"permissions":["read:records"]}]')"
 
 # Disposable probe token — auto-expires, no cleanup needed (--ttl takes s/m/h/d)
 rekor tokens create --name "probe" --ttl 10m \
