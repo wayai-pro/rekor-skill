@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.67.0
+version: 1.68.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -227,7 +227,9 @@ rekor bases create-preview <id> --name "<preview-slug>"
 
 The resulting preview base ID is `<id>--<preview-slug>`. Use that as `--base` for all schema commands.
 
-**If you created `<id>` as a preview in step 3 (free plan), skip this step entirely** — `create-preview` requires a *production* origin and 400s here. Steps 5 and 6 work unchanged: pass `--base <id>` wherever **they** say `--base <id>--<preview-slug>` — that substitution covers step 6's testing commands too. In step 6, **skip the `promote`**: there is no production base to promote to, and promote is paid-plan gated.
+The origin may be a production base **or another preview** — cloning a preview gives you `<preview-id>--<preview-slug>`, linked back to the preview it was cloned from.
+
+**If you created `<id>` as a preview in step 3 (free plan)**, this step still works, but it buys you little: a preview cloned from a preview promotes through its origin, never straight to production, and step 6's `promote` is paid-plan gated regardless. Simplest is to skip this step and work directly in `<id>` — steps 5 and 6 are unchanged if you pass `--base <id>` wherever **they** say `--base <id>--<preview-slug>`, which covers step 6's testing commands too. In step 6, **skip the `promote`**: there is no production base to promote to.
 
 ### 5. Define the first record_type
 
@@ -363,16 +365,22 @@ rekor bases get <id>
 rekor bases create <id> --name <name> [--description <desc>] [--tags <comma-separated>] [--environment <production|preview>]   # production requires a paid plan
 rekor bases rename <id> --name <new-name>   # display name only — the id/slug is immutable
 rekor bases tag <id> --tags <comma-separated>
-rekor bases delete <id>
-rekor bases create-preview <prod-id> --name <preview-slug> [--description <desc>] [--integrations <enabled|disabled>]
+rekor bases delete <id> [--purge]            # --purge is preview-only: also reclaims storage
+rekor bases create-preview <origin-id> --name <preview-slug> [--description <desc>] [--integrations <enabled|disabled>] [--create-only]
 rekor bases update <preview-id> --integrations <enabled|disabled>   # preview-only eval toggle
-rekor bases list-previews <prod-id>
+rekor bases list-previews <origin-id>
 rekor bases promote <prod-id> --from <preview-id> [--dry-run] [--record_types <ids>] [--triggers <ids>] [--inbound-webhooks <ids>]
 rekor bases promotions <prod-id>
 rekor bases rollback <prod-id> --promotion <promotion-id>
 ```
 
 Tags let you group bases (e.g., `client:acme,billing`). Filter with `--tag`. Promotion is **human-only** (see Environments). Promote selectively with `--record_types`/`--triggers`/`--inbound-webhooks` (omit to promote everything). `promotions` lists prior promotions; `rollback` reverts one by ID.
+
+`create-preview` clones from a production base **or another preview**; the new id is `<origin-id>--<preview-slug>` and it links to the origin it was cloned from, so a preview of a preview promotes through that origin rather than straight to production. Re-running it re-applies config onto an existing preview and leaves its data alone — pass `--create-only` to fail instead, which is what you want for a throwaway per-run base where landing on someone else's would corrupt both runs.
+
+**Delete vs purge.** `rekor bases delete <id>` is a tombstone: the base stops being listed, but its records, relationships, file metadata and config are retained, and recreating the id restores them. `--purge` (preview bases only) destroys them permanently. A purged id is then **retired** — it cannot be recreated, so derive a fresh id for the next run. Use purge to tear down disposable bases; a plain delete leaves everything behind forever.
+
+Two things purge does **not** remove: uploaded file contents (only the metadata that indexes them), and the base's rows in the analytical store. Neither is reachable once the id is retired, but both still occupy storage.
 
 **Eval mode (`--integrations disabled`).** A preview can run with its **external integrations disabled** (default `enabled`). When disabled, every external edge goes inert — record_type sources, outbound `external_write` triggers, and inbound-webhook hydration — and the preview serves its own **seeded** data with the exact same schema, tools, and field mappings, **without calling the external systems**. That makes a preview a deterministic, prod-safe target for **agent evals**: exercise your agent's policy against the same canonical surface without polluting a production-only upstream or hitting live rate limits/PII. Seed it by writing records while disabled (writes to source-backed record_types land locally), flip to `enabled` to test the real integration, and re-clone from production to stay drift-free. **Production bases are always `enabled`** — the toggle is preview-only.
 
@@ -1016,7 +1024,7 @@ rekor record-types upsert invoices --base my-base--add-invoices --name "Invoices
 #    rekor bases promote my-base --from my-base--add-invoices
 ```
 
-If `my-base` is itself a preview (the free-plan shape — `rekor bases create <id> --environment preview`), this sequence does not apply: step 1 fails, because `create-preview` requires a *production* origin, and the promote in step 3 is paid-plan gated. Make the config writes directly against `my-base` and stop there.
+If `my-base` is itself a preview (the free-plan shape — `rekor bases create <id> --environment preview`), step 1 still works — `create-preview` clones from a preview origin too — but step 3 does not: the promote is paid-plan gated, and a preview cloned from a preview promotes through its origin rather than straight to production. Make the config writes directly against `my-base` and stop there.
 
 ## Modeling Principles for Agent Consumption
 
