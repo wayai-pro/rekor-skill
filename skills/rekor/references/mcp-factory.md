@@ -203,13 +203,36 @@ Use it to carve a narrow tool out of a broad record_type: `list_active_practitio
 
 - **Combines flat.** The baked predicate, the typed params, and (if exposed) the raw `filter` are AND-combined into ONE group rather than nested pairwise, so the merge costs exactly **one** nesting level no matter how many parts are present. Config-write reserves that level (a `base_filter` is validated in its merged shape, so one that only fits un-merged is rejected up front). The level is not free, though: an agent filter already at the maximum depth will now be one over, so a `base_filter` costs the raw escape hatch one level of headroom.
 - **`list` only.** Rejected on a `get`, which fetches one record by key and has no filter to merge into.
-- **Native record_types only.** A source forwards only the filters it declares, so an invisible predicate on a proxy-backed record_type would either be dropped upstream (silently widening the result the tool promised to narrow) or fail every call with an error naming a filter the agent never sent. Rejected at config-write, and re-checked at promote in case a promote ADDS a source.
+- **Native record_types, or a source-backed one whose list endpoint declares `local_filters`.** A plain source forwards only the filters it declares, so an invisible predicate there would either be dropped upstream (silently widening the result the tool promised to narrow) or fail every call with an error naming a filter the agent never sent. `local_filters` removes that risk by construction — it asserts the collection is bounded and returned whole, and Rekor evaluates the entire predicate itself over the fetched page, exactly as it would for a native record_type. `forward_filters` is **not** enough (it forwards a flat AND of equalities only, so a grouped or range-bearing predicate could never survive the trip). Rejected at config-write, and re-checked at promote in case a promote adds a source, drops `local_filters` from the bound one, or renames the source a declared `external_source` names.
+
+  On a `local_filters` source the predicate is only as faithful as the values it compares. A datetime predicate assumes the upstream field arrives as an ISO datetime — map it with `field_mapping`'s `date_format` if it doesn't, or the comparison degrades to string ordering in proxy mode while an eval run against seeded (canonicalized) data looked correct.
+
+  **It also changes what each call fetches.** Rekor can only apply the predicate to rows it holds, so an Action with a `base_filter` puts every call into local mode: the upstream fetch becomes the whole bounded collection (`max_rows + 1`, 501 by default) from offset 0, rather than the agent's own page — and paginating re-fetches that collection per page. Set `cache_ttl` on the source's list endpoint to amortize it; the local-mode cache key excludes the filter, so one fetch per TTL serves every filter value (including every distinct `$now`).
+
+  **A multi-source record_type must name its source.** The predicate is evaluated against one source, and Rekor auto-binds only when the record_type has exactly one. With two or more, set `external_source` on the Action to say which — otherwise config-write rejects it as unresolvable.
 - **No `search`.** It would route every call off the read-after-write path; an invisible predicate must not silently change where the tool reads from.
 - **Paths** address record data (`data.status`, or a bare `status`) and must resolve against the record_type schema — checked at config-write and again at promote, since a dangling predicate would surface to the agent as "no results" with no way to recover. Bare paths are stored canonicalized, so `rekor pull` always writes `data.status`.
 - **The field must be comparable by the operator.** A value comparison needs a field the schema shows to be scalar — a declared `string`/`number`/`integer`/`boolean`, or (with no declared type) an `enum`/`const` of scalar values, which is how a workflow status field is spelled. **Array** fields take `has` and nothing else (any other operator compares the whole array and matches inconsistently); conversely `has` requires an array. Everything else — objects, maps, `$ref`/`oneOf`-composed fields, a bare `{}` — is rejected with a message naming the fix: address a nested path like `data.address.city`, declare the field's type, or use `is_null`/`is_not_null`, which are presence checks and stay valid against any shape.
 
   The rule is stated as what's *allowed* rather than what's blocked, deliberately: JSON Schema has open-ended ways to express structure, so an unrecognized shape is refused at config-write with an actionable error rather than becoming a predicate that silently matches nothing.
 - **A filterless Action with a `base_filter` no longer forwards the raw `filter` verbatim** — merging requires parsing it first. Practically this means a malformed `filter` is rejected by the translator rather than the engine; the error is the same class either way.
+
+### `$now` — a predicate that stays current
+
+A literal date baked into a `base_filter` ages: `list_free_slots` written today keeps offering yesterday's slots tomorrow. The value `"$now"` is resolved server-side to **the instant of each call**, so "future only" stays true without anyone editing the config.
+
+```bash
+rekor actions upsert list_free_slots --base my-ws --record_type slots --operation list --config '{
+  "base_filter": { "and": [
+    { "field": "data.status",    "op": "eq", "value": "free" },
+    { "field": "data.starts_at", "op": "gt", "value": "$now" }
+  ] }
+}'
+```
+
+- **Where it is allowed.** A field declared `format: date-time`, with a range operator (`gt`, `gte`, `lt`, `lte`). A moving instant is a boundary, not a value, so `eq`/`in` are rejected — as is a `format: date` field, whose right boundary depends on a timezone the predicate doesn't carry.
+- **One instant per call.** Every occurrence in one predicate resolves to the same value, so two conditions can't straddle a tick and produce an empty window.
+- **Only a `base_filter` resolves it.** Nothing else can: a precondition is checked against a live record at the write chokepoint and a trigger filter runs at dispatch — neither is a query the tool translator ever sees. An unresolved `"$now"` would stay a literal string, and a range comparison against it degrades to text ordering, which **matches every row**. So rather than accept it and silently do the wrong thing, Rekor **rejects** `"$now"` in a precondition (both in an Action's config and in the raw `precondition` a REST or batch write may carry), in a trigger filter, and in a typed datetime param (`starts_at_after`). It stays an inert literal only in an agent's raw `filter` argument. Within a `base_filter` it must be the condition's own value — not an array member, which the substitution never reaches — and on a date/date-time field a near-miss spelling like `"$Now"` is refused rather than silently compared as text.
 
 **It is not a security boundary.** Like `precondition`, it shapes the generated tool, not the record_type: a caller with raw REST access to the same base still reads unfiltered rows, and a toolset-bound token's *surface* check is at record_type + operation granularity (filter shape has never been an access boundary). Scope data access with token grants; use `base_filter` to make the agent's job unambiguous, not to keep rows secret.
 

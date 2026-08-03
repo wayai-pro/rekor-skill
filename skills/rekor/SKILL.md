@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.68.0
+version: 1.69.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -859,7 +859,7 @@ rekor toolsets delete invoicing-agent --base my-ws
 - **`filterable_fields`** — expose chosen fields of a `list` Action as typed params (native arguments instead of a raw filter). Per field: `param`, `match` (`exact`/`range`/`text`/`any_of`/`member`/`search`), `enum`, `pattern`, `optional`, `description`. A declared field is **required** by default (it's the tool's question) — `optional: true` opts out, and a range's two bounds are always optional. `param` is a **stem**, not always the final param name: `text` → `<param>_contains`, `range` → `<param>_min`/`_max` (`_after`/`_before` for dates), `search` → `<param>_search`; `exact`/`any_of`/`member` use it verbatim. `match: search` is the only match that reaches the ranked `search` operator (and a field's `x-search` tuning) — see `references/mcp-factory.md`.
 - **`expose_*` + `default_*`** — a `list` Action's machinery params (`filter`/`sort`/`limit`/`offset`/`fields`) are **hidden by default**, so the tool is pure semantics. `expose_<param>: true` opts one back in; `default_*` sets the server-side value applied while a param stays hidden (a hidden `limit` defaults to a generous page).
 - **`writable_fields`** — the write-side mirror on a `create`/`update` Action: an allowlist of exactly the fields it may set (least-privilege intent tools) that also generates a rich typed `data` schema from the record_type schema.
-- **`base_filter`** — a Filter DSL predicate AND-merged server-side into every call of a `list` Action, invisible to the agent. Carves a narrow tool out of a broad record_type (`list_active_practitioners` = the list Action + `status = active` baked in) instead of exposing an optional `status` param the model must know to fill. `list` + native record_types only; not a security boundary (see `references/mcp-factory.md`).
+- **`base_filter`** — a Filter DSL predicate AND-merged server-side into every call of a `list` Action, invisible to the agent. Carves a narrow tool out of a broad record_type (`list_active_practitioners` = the list Action + `status = active` baked in) instead of exposing an optional `status` param the model must know to fill. `list` only, over a native record_type or a source-backed one whose list endpoint declares `local_filters`; not a security boundary. Use the value `"$now"` on a `date-time` field with a range op for a predicate that stays current (`starts_at gt $now` = future only) instead of a literal date that ages — config-only, never a filter argument (see `references/mcp-factory.md`).
 - **`precondition`** — a Filter DSL compare-and-set on a `create`/`update` Action, checked against the record's current state; a miss is a 409 and nothing changes. Invisible to the agent — turns a fragile read-then-write into one race-free call (e.g. `book_slot` only if the slot is still `free`).
 - **`binding`** — pick which **named write binding** of a proxy source's op a write Action dispatches to (see External Sources), keeping one canonical record_type whose writes fan out to several endpoints.
 
