@@ -323,6 +323,16 @@ The generated `list` tools are lenient about how structured arguments arrive: `f
 
 Generated tool schemas are otherwise **closed**: an argument not declared by the tool's `inputSchema` is rejected with the unknown name, a likely correction when one exists, and the valid parameter list. This includes stale typed-filter names after a rename and machinery parameters that aren't exposed; they are never silently discarded into a broader call. A missing **required** filter param is rejected the same way, naming every missing parameter at once so one round trip carries the whole fix.
 
+## External addressing is published by source topology
+
+`external_id` and `external_source` are envelope parameters, not fields of `data`, and a generated tool publishes them only where the agent's value is actually used. `writable_fields` does not reach them — it scopes keys inside `data`.
+
+- **`create` on a source-backed record_type omits `external_id`.** The upstream owns identity: it assigns the id and the source's `id_path` captures it from the create response. A supplied value would not be an idempotency key there — the write path reads it as the upstream *address* and issues an **update** instead of a create, against a record the upstream has never seen. A native record_type keeps the parameter, where upsert-by-`external_id` is the core primitive.
+- **`create` omits `external_source` wherever the server already resolves it** — an Action that pins one, or a record_type with exactly one source (auto-bind). Passing it there could never redirect the write; it was always overridden. It stays published on a sourceless record_type, where it is a free-form tag scoping your own `external_id`. (A multi-source record_type must pin `external_source` on the Action — config-write rejects an Action without one, as **A multi-source record_type must name its source** above describes — so the param is withheld there too. You can still reach a published one by drift, if you add a source to a record_type whose Actions already exist.)
+- **`get`/`update`/`delete` are unchanged.** Both params stay published on every topology. `external_id` is the only address a proxy-backed row has — read it off the `list` tool rather than inventing one — and while `external_source` is overridden there just as it is on `create`, withholding it would prevent no misroute and only break a call that names it.
+
+Both rules read config alone, never the base's `integrations` mode, so an `--integrations disabled` eval clone publishes an identical surface.
+
 ## Which base serves the toolset
 
 `mcp.rekor.pro/t/{slug}/mcp` resolves the toolset from the base your **token** is scoped to. So:
