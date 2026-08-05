@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.70.0
+version: 1.71.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -101,6 +101,7 @@ Route any request to the right feature, then jump to that section of the command
 | Reports, aggregations, joins | `rekor sql` | SQL Query |
 | Store PDFs / images / versioned documents | file type + files; mount over S3 | Files |
 | Several writes, all-or-nothing | `rekor batch` | Batch |
+| Load historical data in bulk (backfill) | REST import sessions (`begin` → chunks → `finalize`) | Bulk Import |
 | Notify an external system on data change | trigger → webhook | Triggers |
 | "When A changes, update related B" | trigger → `internal_write` (async or transactional) | Triggers |
 | Mirror native records out to an upstream API | trigger → `external_write` reusing a source | Triggers, External Sources |
@@ -742,6 +743,27 @@ A relationship op addresses each endpoint by internal id (`source_id`/`target_id
 
 **Reading results**: the default (table) output prints a one-line summary per operation (index, type, resulting id). Add `--output json` for the full per-operation payload — the complete record/relationship of every write. Because the batch is atomic, a single failing operation rolls the **whole** batch back and the command exits non-zero with `Operation <N> failed: <reason>` naming the offending index — no partial writes land.
 
+### Bulk Import (REST)
+
+For a historical backfill, the import sessions API is the purpose-built path — it writes like ordinary upserts but **skips trigger fan-out** (no webhooks, no internal/external write cascades fire for backfilled rows), which is why it needs the dedicated `write:imports` permission on top of `write:records`. There is no CLI command yet; drive it over REST:
+
+```
+POST /v1/{base_id}/import/begin        {"request_key":"<your-run-id>","record_type":"<record_type>"}
+POST /v1/{base_id}/import/chunk        {"import_id":"<from begin>","chunk_index":0,"rows":[{"external_id":"…","data":{…}}, …]}
+POST /v1/{base_id}/import/{import_id}/finalize
+GET  /v1/{base_id}/import/sessions     — list sessions (newest first) to find or recover a stuck run
+```
+
+Contract highlights:
+- `begin` is **idempotent by `request_key`** (pick one per logical run): a lost response is safely re-sent and returns the same session. Reusing a key with a *different* record type while the session is open is a 409 — one key, one record type per run. Once a session is finalized its key is free again (tomorrow's run of the same job can reuse it and gets a fresh session).
+- Chunks are ≤1,000 rows, indexed by `chunk_index`, and each is receipted server-side: re-sending the **same** chunk (same index, same content) replays the recorded result without re-applying — so a timeout or dropped connection is safe to retry (like a seed-lease exact retry, and unlike every other data write). Re-sending an index with **different** content is a 409 (`IMPORT_CHUNK_HASH_MISMATCH`); resuming from edited input needs a new session.
+- Rows upsert by `external_id`; a row whose content already matches is skipped without a write, so re-running a full refresh only rewrites actual changes. One exception: a matching row not written to in ~45 days is rewritten anyway (version bump, an update in its history) to keep periodically re-imported records counted as active rather than drifting into archival — so refreshes sparser than that see every row rewritten, and `rows_skipped` is not a reliable idempotency assertion across long gaps.
+- Every validation and archival/workflow gate applies exactly as on normal writes — import into an `immutable` record type is create-only. Native record types only (a source-backed type can't be bulk-written).
+- A session idle for 24h has its open slot reclaimed (this happens when the next `begin` or `finalize` runs on the base, so an untouched idle session may linger until then); at most a handful may be open per base — `finalize` when done.
+
+Each chunk meters a **flat 1 op** regardless of row count while full import pricing (an included allowance sized to your record cap) ships separately; `begin`/`finalize` are free, and the plan record cap still applies to imported rows.
+
+
 ### Seed Fixtures (hermetic eval data)
 
 A **fixture** is a named, reversible set of records (and relationships) you apply to a **preview** base to give agent evals a clean, re-runnable starting state. Author it as config-as-code and drive it by name — so an eval harness (even a headless/cloud one, using a scoped token) can reset the data around each run without a dirty base carrying over.
@@ -926,7 +948,7 @@ rekor tokens prune --unused-since 30d --yes
 
 **Revoke guardrail**: revoking a token that was used in the last 7 days or is toolset-bound (a consumer token — an MCP connection likely holds it) is refused with a warning; pass `--force` to override. Do NOT `--force` (or prune with `--include-bound`) unless a human has confirmed nothing depends on the token — revocation is permanent and breaks live traffic immediately. Expired tokens revoke without friction.
 
-**Permissions**: `read:records`, `write:records`, `read:record_types`, `write:record_types`, `read:relationships`, `write:relationships`, `read:relationship_types`, `write:relationship_types`, `read:attachments`, `write:attachments`, `read:files`, `write:files`, `read:file_types`, `write:file_types`, `read:inbound_webhooks`, `write:inbound_webhooks`, `read:triggers`, `write:triggers`, `read:toolsets`, `write:toolsets`, `read:actions`, `write:actions`, `read:seeds`, `write:seeds`, `read:bases`, `write:bases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), or `*` for all.
+**Permissions**: `read:records`, `write:records`, `read:record_types`, `write:record_types`, `read:relationships`, `write:relationships`, `read:relationship_types`, `write:relationship_types`, `read:attachments`, `write:attachments`, `read:files`, `write:files`, `read:file_types`, `write:file_types`, `read:inbound_webhooks`, `write:inbound_webhooks`, `read:triggers`, `write:triggers`, `read:toolsets`, `write:toolsets`, `read:actions`, `write:actions`, `read:seeds`, `write:seeds`, `read:bases`, `write:bases`, `read:audit` (read-only; grants change-history access, admin-gated, not implied by other grants), `write:imports` (bulk historical import; separate from `write:records` because an import commits without firing triggers, not implied by other grants), or `*` for all.
 
 **Scope fields**: `bases` (required), `record_types` (optional — omit for all), `environments` (optional — `production`, `preview`, or omit for both).
 
