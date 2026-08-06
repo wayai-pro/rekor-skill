@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.71.0
+version: 1.74.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -755,13 +755,13 @@ GET  /v1/{base_id}/import/sessions     — list sessions (newest first) to find 
 ```
 
 Contract highlights:
-- `begin` is **idempotent by `request_key`** (pick one per logical run): a lost response is safely re-sent and returns the same session. Reusing a key with a *different* record type while the session is open is a 409 — one key, one record type per run. Once a session is finalized its key is free again (tomorrow's run of the same job can reuse it and gets a fresh session).
+- `begin` is **idempotent by `request_key`** (pick one per logical run): a lost response is safely re-sent and returns the same session. Reusing a key with a *different* record type while the session is open is a 409 — one key, one record type per run. Once a session is finalized its key is free again (tomorrow's run of the same job can reuse it and gets a fresh session). A `begin` that returns **503** could not read your remaining allowance and created **no** session — retry it with the same `request_key`.
 - Chunks are ≤1,000 rows, indexed by `chunk_index`, and each is receipted server-side: re-sending the **same** chunk (same index, same content) replays the recorded result without re-applying — so a timeout or dropped connection is safe to retry (like a seed-lease exact retry, and unlike every other data write). Re-sending an index with **different** content is a 409 (`IMPORT_CHUNK_HASH_MISMATCH`); resuming from edited input needs a new session.
 - Rows upsert by `external_id`; a row whose content already matches is skipped without a write, so re-running a full refresh only rewrites actual changes. One exception: a matching row not written to in ~45 days is rewritten anyway (version bump, an update in its history) to keep periodically re-imported records counted as active rather than drifting into archival — so refreshes sparser than that see every row rewritten, and `rows_skipped` is not a reliable idempotency assertion across long gaps.
 - Every validation and archival/workflow gate applies exactly as on normal writes — import into an `immutable` record type is create-only. Native record types only (a source-backed type can't be bulk-written).
-- A session idle for 24h has its open slot reclaimed (this happens when the next `begin` or `finalize` runs on the base, so an untouched idle session may linger until then); at most a handful may be open per base — `finalize` when done.
+- A session idle for 24h has its open slot reclaimed (this happens when the next `begin` or `finalize` runs on the base, so an untouched idle session may linger until then); at most a handful may be open per base — `finalize` when done. A session also ends at the **UTC month boundary**, because its included-row allowance belongs to the month it started in: the first chunk sent in a new month returns 409 `IMPORT_SESSION_CLOSED` with `details.status: "expired"`. Recover by calling `begin` again (the same `request_key` returns a fresh session) and re-sending that chunk — rows already written are skipped, so crossing a boundary costs one extra `begin`, not a re-import. A `details.status` of `closed` means the run was deliberately finalized instead; don't restart that one automatically.
 
-Each chunk meters a **flat 1 op** regardless of row count while full import pricing (an included allowance sized to your record cap) ships separately; `begin`/`finalize` are free, and the plan record cap still applies to imported rows.
+Your plan includes **bulk-import rows equal to its record cap each month**; rows past that cost 1 op per 20 rows, rounded up per request to a minimum of 0.1 op (so send rows in reasonable batches — smaller chunks never cost less). Only rows actually **written** count — skipped (unchanged) rows and replayed chunks are free, so a re-run costs only what changed, with the ~45-day archival rewrite above as the one exception: a refresh sparser than that rewrites and bills every row. `begin`/`finalize` are free, interactive (non-token) imports are not metered, and the plan record cap still applies to imported rows.
 
 
 ### Seed Fixtures (hermetic eval data)
