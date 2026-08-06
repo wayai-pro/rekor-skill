@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.74.0
+version: 1.75.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -751,6 +751,7 @@ For a historical backfill, the import sessions API is the purpose-built path —
 POST /v1/{base_id}/import/begin        {"request_key":"<your-run-id>","record_type":"<record_type>"}
 POST /v1/{base_id}/import/chunk        {"import_id":"<from begin>","chunk_index":0,"rows":[{"external_id":"…","data":{…}}, …]}
 POST /v1/{base_id}/import/{import_id}/finalize
+POST /v1/{base_id}/import/{import_id}/rollback   — undo the import (deletes only rows it CREATED)
 GET  /v1/{base_id}/import/sessions     — list sessions (newest first) to find or recover a stuck run
 ```
 
@@ -761,7 +762,9 @@ Contract highlights:
 - Every validation and archival/workflow gate applies exactly as on normal writes — import into an `immutable` record type is create-only. Native record types only (a source-backed type can't be bulk-written).
 - A session idle for 24h has its open slot reclaimed (this happens when the next `begin` or `finalize` runs on the base, so an untouched idle session may linger until then); at most a handful may be open per base — `finalize` when done. A session also ends at the **UTC month boundary**, because its included-row allowance belongs to the month it started in: the first chunk sent in a new month returns 409 `IMPORT_SESSION_CLOSED` with `details.status: "expired"`. Recover by calling `begin` again (the same `request_key` returns a fresh session) and re-sending that chunk — rows already written are skipped, so crossing a boundary costs one extra `begin`, not a re-import. A `details.status` of `closed` means the run was deliberately finalized instead; don't restart that one automatically.
 
-Your plan includes **bulk-import rows equal to its record cap each month**; rows past that cost 1 op per 20 rows, rounded up per request to a minimum of 0.1 op (so send rows in reasonable batches — smaller chunks never cost less). Only rows actually **written** count — skipped (unchanged) rows and replayed chunks are free, so a re-run costs only what changed, with the ~45-day archival rewrite above as the one exception: a refresh sparser than that rewrites and bills every row. `begin`/`finalize` are free, interactive (non-token) imports are not metered, and the plan record cap still applies to imported rows.
+**Undo:** `rollback` soft-deletes only the rows the import **created** — a row it merely overwrote stays, keeping the imported values (there is no version-revert). Links pointing at deleted rows go too, so nothing is left dangling. It works in pages: each call returns `swept` and `complete`, so keep calling until `complete` is true. Retrying is always safe — pages already swept stay swept, so a call that fails with a retryable `503` (a busy base) never resurrects what you already undid; just call again. Like the import itself, **it fires no triggers** — neither the deletes nor the removed links notify anything, so a trigger that syncs deletions to another system will not see them and that system keeps the rows. It needs `write:imports`, `write:records` for the record type, and `write:relationships` (the sweep may always remove links). If a rolled-back record had files attached, the attachment link goes but the **file itself stays** — undo removes only what the import created, and the file was added afterwards; delete it explicitly if you don't want it. Two further limits worth knowing: rows already moved to archival storage are out of reach, so the practical undo window is roughly the archival cadence, and for an `immutable` record type re-import cannot overwrite them either — importing into those is correct-first-time territory. **Re-importing with corrected data is usually the better fix**: rows upsert by `external_id`, so a corrected re-run overwrites in place.
+
+Your plan includes **bulk-import rows equal to its record cap each month**; rows past that cost 1 op per 20 rows, rounded up per request to a minimum of 0.1 op (so send rows in reasonable batches — smaller chunks never cost less). Only rows actually **written** count — skipped (unchanged) rows and replayed chunks are free, so a re-run costs only what changed, with the ~45-day archival rewrite above as the one exception: a refresh sparser than that rewrites and bills every row. `begin`/`finalize` are free, each `rollback` call costs 1 op (so undoing a large import costs one op per page), interactive (non-token) imports are not metered, and the plan record cap still applies to imported rows.
 
 
 ### Seed Fixtures (hermetic eval data)
