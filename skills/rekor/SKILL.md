@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.75.0
+version: 1.76.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -101,7 +101,7 @@ Route any request to the right feature, then jump to that section of the command
 | Reports, aggregations, joins | `rekor sql` | SQL Query |
 | Store PDFs / images / versioned documents | file type + files; mount over S3 | Files |
 | Several writes, all-or-nothing | `rekor batch` | Batch |
-| Load historical data in bulk (backfill) | REST import sessions (`begin` → chunks → `finalize`) | Bulk Import |
+| Load historical data in bulk (backfill) | `rekor import run` (NDJSON; streams, resumes) | Bulk Import |
 | Notify an external system on data change | trigger → webhook | Triggers |
 | "When A changes, update related B" | trigger → `internal_write` (async or transactional) | Triggers |
 | Mirror native records out to an upstream API | trigger → `external_write` reusing a source | Triggers, External Sources |
@@ -743,15 +743,28 @@ A relationship op addresses each endpoint by internal id (`source_id`/`target_id
 
 **Reading results**: the default (table) output prints a one-line summary per operation (index, type, resulting id). Add `--output json` for the full per-operation payload — the complete record/relationship of every write. Because the batch is atomic, a single failing operation rolls the **whole** batch back and the command exits non-zero with `Operation <N> failed: <reason>` naming the offending index — no partial writes land.
 
-### Bulk Import (REST)
+### Bulk Import
 
-For a historical backfill, the import sessions API is the purpose-built path — it writes like ordinary upserts but **skips trigger fan-out** (no webhooks, no internal/external write cascades fire for backfilled rows), which is why it needs the dedicated `write:imports` permission on top of `write:records`. There is no CLI command yet; drive it over REST:
+For a historical backfill, import is the purpose-built path — it writes like ordinary upserts but **skips trigger fan-out** (no webhooks, no internal/external write cascades fire for backfilled rows), which is why it needs the dedicated `write:imports` permission on top of `write:records`.
+
+Use the CLI. It streams the file (so size is not bounded by memory), chunks it, and handles the resume and month-boundary cases below for you:
+
+```bash
+rekor import run patients --file patients.ndjson --base prod   # one JSON object per line
+rekor import list [--limit <n>] [--offset <n>] --base prod     # sessions, newest first
+rekor import rollback <import_id> --base prod                  # undo (prompts only in a terminal)
+```
+
+`run` prints the `request_key` it generated. Keep it: if the run dies partway, `rekor import run … --request-key <key> --start-chunk <n>` resumes from that chunk instead of re-sending the file. **Pass the same `--chunk-size` you used originally** — chunk numbers are derived from it, so resuming under a different size would point index N at different rows; the CLI requires the flag explicitly whenever you use `--start-chunk`. If a run stops partway it tells you the chunk index to resume at — re-run the *same* command with the `--start-chunk`/`--chunk-size`/`--request-key` it prints and every other flag unchanged. Do not retype the command from scratch: a too-high `--start-chunk` skips rows silently, and dropping `--base` or `--org` resumes into a different base entirely. `--chunk-size` is ≤1,000; `--no-finalize` leaves the session open for a later resume.
+
+**If you are driving it yourself** rather than using the CLI — a language runtime, a scheduled job — the REST surface is:
 
 ```
 POST /v1/{base_id}/import/begin        {"request_key":"<your-run-id>","record_type":"<record_type>"}
 POST /v1/{base_id}/import/chunk        {"import_id":"<from begin>","chunk_index":0,"rows":[{"external_id":"…","data":{…}}, …]}
 POST /v1/{base_id}/import/{import_id}/finalize
 POST /v1/{base_id}/import/{import_id}/rollback   — undo the import (deletes only rows it CREATED)
+GET  /v1/{base_id}/import/{import_id}/rollback-plan?counts=true  — what an undo would reach, before doing it
 GET  /v1/{base_id}/import/sessions     — list sessions (newest first) to find or recover a stuck run
 ```
 
@@ -762,9 +775,9 @@ Contract highlights:
 - Every validation and archival/workflow gate applies exactly as on normal writes — import into an `immutable` record type is create-only. Native record types only (a source-backed type can't be bulk-written).
 - A session idle for 24h has its open slot reclaimed (this happens when the next `begin` or `finalize` runs on the base, so an untouched idle session may linger until then); at most a handful may be open per base — `finalize` when done. A session also ends at the **UTC month boundary**, because its included-row allowance belongs to the month it started in: the first chunk sent in a new month returns 409 `IMPORT_SESSION_CLOSED` with `details.status: "expired"`. Recover by calling `begin` again (the same `request_key` returns a fresh session) and re-sending that chunk — rows already written are skipped, so crossing a boundary costs one extra `begin`, not a re-import. A `details.status` of `closed` means the run was deliberately finalized instead; don't restart that one automatically.
 
-**Undo:** `rollback` soft-deletes only the rows the import **created** — a row it merely overwrote stays, keeping the imported values (there is no version-revert). Links pointing at deleted rows go too, so nothing is left dangling. It works in pages: each call returns `swept` and `complete`, so keep calling until `complete` is true. Retrying is always safe — pages already swept stay swept, so a call that fails with a retryable `503` (a busy base) never resurrects what you already undid; just call again. Like the import itself, **it fires no triggers** — neither the deletes nor the removed links notify anything, so a trigger that syncs deletions to another system will not see them and that system keeps the rows. It needs `write:imports`, `write:records` for the record type, and `write:relationships` (the sweep may always remove links). If a rolled-back record had files attached, the attachment link goes but the **file itself stays** — undo removes only what the import created, and the file was added afterwards; delete it explicitly if you don't want it. Two further limits worth knowing: rows already moved to archival storage are out of reach, so the practical undo window is roughly the archival cadence, and for an `immutable` record type re-import cannot overwrite them either — importing into those is correct-first-time territory. **Re-importing with corrected data is usually the better fix**: rows upsert by `external_id`, so a corrected re-run overwrites in place.
+**Undo:** `rekor import rollback <import_id>` (or the REST route) soft-deletes only the rows the import **created** — a row it merely overwrote stays, keeping the imported values (there is no version-revert). Links pointing at deleted rows go too, so nothing is left dangling. It works in pages: each call returns `swept` and `complete`, so keep calling until `complete` is true — the CLI loops for you. **In a terminal** it first shows the live matched count and asks to confirm (`--yes` skips that). Anywhere else — a script, CI, or an agent, none of which is a TTY — there is no prompt and the sweep starts immediately, following the same convention as the other destructive commands. Check the count yourself first with `GET /v1/{base_id}/import/{import_id}/rollback-plan?counts=true` if you want one. Retrying is always safe — pages already swept stay swept, so a call that fails with a retryable `503` (a busy base) never resurrects what you already undid; just call again. Like the import itself, **it fires no triggers** — neither the deletes nor the removed links notify anything, so a trigger that syncs deletions to another system will not see them and that system keeps the rows. It needs `write:imports`, `write:records` for the record type, and `write:relationships` (the sweep may always remove links). If a rolled-back record had files attached, the attachment link goes but the **file itself stays** — undo removes only what the import created, and the file was added afterwards; delete it explicitly if you don't want it. Two further limits worth knowing: rows already moved to archival storage are out of reach, so the practical undo window is roughly the archival cadence, and for an `immutable` record type re-import cannot overwrite them either — importing into those is correct-first-time territory. **Re-importing with corrected data is usually the better fix**: rows upsert by `external_id`, so a corrected re-run overwrites in place.
 
-Your plan includes **bulk-import rows equal to its record cap each month**; rows past that cost 1 op per 20 rows, rounded up per request to a minimum of 0.1 op (so send rows in reasonable batches — smaller chunks never cost less). Only rows actually **written** count — skipped (unchanged) rows and replayed chunks are free, so a re-run costs only what changed, with the ~45-day archival rewrite above as the one exception: a refresh sparser than that rewrites and bills every row. `begin`/`finalize` are free, each `rollback` call costs 1 op (so undoing a large import costs one op per page), interactive (non-token) imports are not metered, and the plan record cap still applies to imported rows.
+Your plan includes **bulk-import rows equal to its record cap each month**; rows past that cost 1 op per 20 rows, rounded up per request to a minimum of 0.1 op (so send rows in reasonable batches — smaller chunks never cost less). Only rows actually **written** count — skipped (unchanged) rows and replayed chunks are free, so a re-run costs only what changed, with the ~45-day archival rewrite above as the one exception: a refresh sparser than that rewrites and bills every row. `begin`/`finalize` are free, each `rollback` call costs 1 op (so undoing a large import costs one op per page), and the `rollback-plan` pre-check costs 1 op with `?counts=true` (it walks the import's rows to count them) or 0.1 without. Interactive (non-token) imports are not metered, and the plan record cap still applies to imported rows.
 
 
 ### Seed Fixtures (hermetic eval data)
