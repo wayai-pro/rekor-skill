@@ -1,11 +1,11 @@
 ---
 name: rekor
-version: 1.76.0
+version: 1.77.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
   working in preview and promoting to production, managing config as code (rekor
-  pull/push), pulling ready-made templates, upserting or querying records (Filter DSL
+  pull/push), upserting or querying records (Filter DSL
   or SQL), managing relationships, storing versioned files or attachments (incl. S3
   mounts), configuring inbound webhooks, triggers, batch operations, or seed fixtures
   for agent evals, backing a record_type with an external API (external sources,
@@ -78,7 +78,6 @@ Two schema→instance pairs anchor the model: **record type → record** and **r
 | **Seed fixture / lease** | Named, reversible records+relationships baseline for hermetic agent evals. Definitions are config; `apply`/`reset`/`clear` are preview-only data operations. An actor-bound lease exclusively resets, owns, and clears fixture state for one eval run | `rekor seed`, `rekor seed lease` |
 | **API token** | `rec_…` credential: grant-scoped (bases × record_types × environments × permissions) or **toolset-bound** (its authorization IS one toolset's tool surface) | `rekor tokens` |
 | **Secret** | Org-level encrypted credential (string or file blob), referenced from source/trigger config as `vault:<name>`, pullable by executors at dispatch | `rekor secrets` |
-| **Template** | Ready-made config-as-code data layer (record types, relationship types, Actions, toolsets) you `pull`, `push`, and promote | `rekor template` |
 
 **Identity rules.** Config slugs are permanent ids (see **Agent Guidelines**). Always set `external_id` on records that have a natural key — retries and re-imports then upsert instead of duplicating. Every record write is validated against its record type schema (plus `x-fk` reference checks and datetime canonicalization).
 
@@ -115,7 +114,6 @@ Route any request to the right feature, then jump to that section of the command
 | Least-privilege machine/CI access | scoped tokens (`create-for-toolset` for agents) | API Tokens |
 | Store integration credentials | secret vault (`vault:<name>` references) | Secrets |
 | Manage config in git / review in PRs | `rekor pull` / `rekor push` | Config as Code |
-| Stand up a proven data layer in minutes | `rekor template pull` | Templates |
 | Deterministic agent evals, no live upstream | preview with `--integrations disabled` + seed fixtures | Bases, Seed Fixtures |
 | Import/export provider tool definitions | provider adapters | Provider Adapters |
 | See who changed what, and when | `history` subcommands (admin-gated) | Records |
@@ -404,20 +402,6 @@ rekor unbind                         # clear this worktree's base binding
 - **Deletions are opt-in.** Because deleting a record_type also removes its records, `push` is additive by default: entities missing from your files are reported but kept. Add `--prune` to delete them.
 - **Record base context in `AGENTS.md`.** On `pull`/`push`, Rekor seeds (create-if-absent, never overwriting your edits) an `AGENTS.md` + a one-line `CLAUDE.md` `@AGENTS.md` shim in each base folder (`rekor-ws/bases/<db>/`). Use the base folder's `AGENTS.md` to capture what the config itself can't: the base's **purpose**, **key decisions and why**, **business rules**, **terminology**, and **integration quirks**. Keep it current as the base evolves — it's the durable memory the next agent reads before touching this data layer. If the files are missing (e.g. an older pull), create them yourself in the same shape.
 - **Renaming a record_type is re-seed, not in-place.** A record_type's `id` is its identity and must equal its filename (`record-types/<id>.yaml`), so renaming means updating **both** the filename and the inner `id:` field together (changing only one errors; or delete the inner `id:` so it defaults to the filename). Either way it's a **create-new + orphan-old**, not an in-place rename: the diff shows `+ <new>` / `- <old>`, `push` creates a new **empty** record_type, and the old one (with all its records) is left untouched — records do **not** migrate. To rename and keep the data: (1) `push` to create the new empty record_type, (2) re-seed its records (e.g. `rekor records upsert`, or batch), then (3) `push --prune` to delete the orphaned old record_type, which cascades its records. The same filename-is-`id` rule applies to relationship types and the other config entities.
-
-### Templates
-
-Ready-made data layers you can pull and stand up in minutes — each bundles a base's record_types, relationship types, Actions, and curated toolsets for an AI agent.
-
-```bash
-rekor template list                                       # browse available templates
-rekor template pull <slug> [--lang en|pt|es] [--dry-run]  # write a template's data layer into rekor-ws/bases/<slug>/
-rekor template pull <slug> --force                        # overwrite existing files in the target folder
-```
-
-- **`pull` seeds a config-as-code folder.** It writes the template's record_types, relationship types, Actions, and MCP toolsets into `rekor-ws/bases/<slug>/` (id defaults to the slug; override with `--base <id>`), pre-wired with an `origin_base_id` so the normal flow stands it up: `rekor bases create <id> --name "…"`, then `rekor push <id>`, then `rekor bases promote <id> --from <preview>`. Once promoted, the template's MCP toolsets are live for your agents. That flow needs a **paid plan** — both the production base and the promote are gated. On the free plan, `pull` writes a `base.yaml` carrying `origin_base_id` and no `base_id`, which makes `push` try to create a preview *from a production base that doesn't exist*; edit `base.yaml` to set `base_id: <id>` and drop `origin_base_id` first, then `rekor bases create <id> --name "…" --environment preview` and `rekor push <id>` stand the template up in a preview you can develop and run agents against.
-- **`pull` won't overwrite your edits.** If the target folder already has files the template would write, `pull` refuses and lists them (your other files are left untouched) — pass `--force` to overwrite, `--base <new-id>` to write elsewhere, or `--dry-run` to preview the file set first.
-- **`--lang`** selects a localized variant; an untranslated language falls back to the default (with a note).
 
 ### RecordTypes
 
