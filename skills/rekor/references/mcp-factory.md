@@ -340,6 +340,6 @@ Both rules read config alone, never the base's `integrations` mode, so an `--int
 - **Production:** promote the toolset (and the Actions it references), then connect with a token scoped to the production base (`my-ws`).
 - **Preview (sandbox testing):** connect with a token scoped to the **preview base id** (`my-ws--<preview-slug>`) to serve the not-yet-promoted toolset.
 
-If the slug cannot be resolved for your token's base (unknown toolset, or one that only exists in a preview you are not scoped to), `initialize` returns a clear JSON-RPC error telling you to scope to the preview base id or promote — it will not silently hand back a session with zero tools.
+If the slug cannot be resolved for your token's base (unknown toolset, or one that only exists in a preview you are not scoped to), listing the tools returns a clear JSON-RPC error telling you to scope to the preview base id or promote — it will not silently hand back an empty tool list. (A tool call made without listing first reports the underlying not-found instead, so read the error from the listing step.)
 
 **Promotion blocking.** Promotion is blocked if it would break a published toolset — removing a record_type or relationship type it exposes, dropping an Action a reference points at, or removing a field its `filterable_fields`, `writable_fields`, `base_filter`, or `precondition` depend on, or a named write binding an Action's `binding` selects — so promote the Actions and toolset together with the schema change (a dry run lists any such conflicts first).
