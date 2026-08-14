@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.78.0
+version: 1.79.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -114,7 +114,7 @@ Route any request to the right feature, then jump to that section of the command
 | Least-privilege machine/CI access | scoped tokens (`create-for-toolset` for agents) | API Tokens |
 | Store integration credentials | secret vault (`vault:<name>` references) | Secrets |
 | Manage config in git / review in PRs | `rekor pull` / `rekor push` | Config as Code |
-| Deterministic agent evals, no live upstream | preview with `--integrations disabled` + seed fixtures | Bases, Seed Fixtures |
+| Deterministic agent evals, no live upstream | preview with `--integrations disabled` (+ `--analytics local` for disposable data) + seed fixtures | Bases, Seed Fixtures |
 | Import/export provider tool definitions | provider adapters | Provider Adapters |
 | See who changed what, and when | `history` subcommands (admin-gated) | Records |
 | Decide native vs proxy vs mirror backing | the pattern catalog | Integration Modeling |
@@ -361,11 +361,11 @@ rekor query-relationships invoices rec_abc --base my-ws \
 ```bash
 rekor bases list [--tag <tag>]
 rekor bases get <id>
-rekor bases create <id> --name <name> [--description <desc>] [--tags <comma-separated>] [--environment <production|preview>]   # production requires a paid plan
+rekor bases create <id> --name <name> [--description <desc>] [--tags <comma-separated>] [--environment <production|preview>] [--analytics <standard|local>]   # production requires a paid plan
 rekor bases rename <id> --name <new-name>   # display name only — the id/slug is immutable
 rekor bases tag <id> --tags <comma-separated>
 rekor bases delete <id> [--purge]            # --purge is preview-only: also reclaims storage
-rekor bases create-preview <origin-id> --name <preview-slug> [--description <desc>] [--integrations <enabled|disabled>] [--create-only]
+rekor bases create-preview <origin-id> --name <preview-slug> [--description <desc>] [--integrations <enabled|disabled>] [--analytics <standard|local>] [--create-only]
 rekor bases update <preview-id> --integrations <enabled|disabled>   # preview-only eval toggle
 rekor bases list-previews <origin-id>
 rekor bases promote <prod-id> --from <preview-id> [--dry-run] [--record_types <ids>] [--triggers <ids>] [--inbound-webhooks <ids>]
@@ -383,6 +383,23 @@ Two things purge does **not** remove: uploaded file contents (only the metadata 
 
 **Eval mode (`--integrations disabled`).** A preview can run with its **external integrations disabled** (default `enabled`). When disabled, every external edge goes inert — record_type sources, outbound `external_write` triggers, and inbound-webhook hydration — and the preview serves its own **seeded** data with the exact same schema, tools, and field mappings, **without calling the external systems**. That makes a preview a deterministic, prod-safe target for **agent evals**: exercise your agent's policy against the same canonical surface without polluting a production-only upstream or hitting live rate limits/PII. Seed it by writing records while disabled (writes to source-backed record_types land locally), flip to `enabled` to test the real integration, and re-clone from production to stay drift-free. **Production bases are always `enabled`** — the toggle is preview-only.
 
+**Analytics tier (`--analytics local`).** A preview can keep its data **out of the analytical store** entirely. On `local`, records and relationships live in the base itself and are never mirrored, which suits a disposable eval base whose data is garbage the moment the run ends.
+
+Two consequences, and the first is **data loss, not a read restriction**:
+
+- **Change history is not recorded at all.** It is discarded, not relocated — no audit row is written anywhere for any write on such a base. The `history` subcommands and the audit endpoints return an error rather than an empty list, but there is nothing behind that error to recover. Never choose `local` for a base whose history you might want.
+- **Reads that would have come from the analytical store refuse rather than answer empty:** raw SQL over the record tables and relationship traversal. Single-record reads and ordinary filter-DSL lists are served from the base itself and work as usual — but a query the base cannot answer on its own falls into the same refusal. That covers the **`search` operator**, a filter referencing `archived`, a comparison of `created_at`/`updated_at` against a datetime literal carrying **no timezone offset**, and any list whose scope holds more live rows than the in-base cap (10,000). That cap is per record_type for records and **base-wide** for relationships, and it is measured against the whole scope **before paging** — a smaller `--limit` does not lift it, so size seeded fixtures below it.
+
+Plan eval assertions around exact filters on `data.*` fields, and give any `created_at`/`updated_at` bound an explicit offset (`2026-08-01T00:00:00Z`).
+
+The tier is **fixed when the base is created** and preview-only. There is no switch in either direction — nothing reconciles the store across a change, so a base minted on the wrong tier can only be replaced (`--purge` plus a **new** id, since a purged id is retired). Set it deliberately at creation:
+
+```bash
+rekor bases create-preview <origin> --name eval-run-42 --integrations disabled --analytics local --create-only
+```
+
+Leave it unset for anything whose history or SQL you will want later.
+
 ### Config as Code (pull / push)
 
 Manage a base's whole config — record_types, relationship types, inbound webhooks, triggers, MCP toolsets, seed fixtures — as version-controlled YAML files instead of one-off commands. Files live under `rekor-ws/bases/<db>/`, one file per entity, so changes review cleanly in a pull request.
@@ -397,6 +414,7 @@ rekor unbind                         # clear this worktree's base binding
 
 - **Previews are the only edit target.** `push` only writes **preview** bases (config is never edited directly in production). When you `pull` a preview, the linked production config is also written beside it as a **read-only reference** folder (`rekor-ws/bases/<prod>/`) so you can see the live production config while iterating — it's marked read-only (`push` refuses it and bare `pull`/`push` auto-selection ignores it). `pull <production>` directly writes only that read-only reference. To ship, run `rekor bases promote` as usual.
 - **Auto-create a preview.** Scaffold `rekor-ws/bases/<name>/base.yaml` with `origin_base_id: <prod-id>` (and no `base_id`); `rekor push` creates the preview from that production base, writes the new id back, and applies your files.
+- **`base.yaml` describes the base, it does not reconfigure it.** Alongside `base_id`/`origin_base_id`, `pull` records the base's `environment`, `integrations` and `analytics` there so the folder documents what it targets. Of these only the id fields drive `push`; the rest are descriptive, and the create-only `analytics` tier in particular can never be changed by editing this file. Set that tier when the base is created (`rekor bases create-preview --analytics local`), and treat a surprising value here as a signal to re-check the base, not to edit the file.
 - **Worktree binding (routing guard).** Each git checkout (main or linked worktree) can be bound to one base. `pull`/`push` refuse to run against a different base once bound — catching the common mistake of a prompt landing in the wrong terminal/worktree and clobbering another preview's config. The binding is set automatically on the first successful `pull`/`push` into an unbound checkout (and on creating a new preview), is per-worktree and never committed, and complements `.rekor.yaml` (which pins the org repo-wide). `rekor status` shows the current binding. **If `pull`/`push` errors with a binding mismatch, stop and ask the user before doing anything else** — it usually means the prompt was meant for a different worktree. Do **not** run `rekor unbind` / `rekor use` without explicit user instruction in the current session; changing the binding is a routing decision, like switching which base the user thinks you're working on.
 - **Secrets are never written to files.** Inbound-webhook/trigger and external-source secrets are stripped on `pull`. On `push`, a newly added inbound webhook/trigger gets a fresh secret (printed once — save it); existing secrets are left untouched. Manage secret values with `rekor inbound-webhooks` / `rekor triggers` / `rekor secrets`.
 - **Deletions are opt-in.** Because deleting a record_type also removes its records, `push` is additive by default: entities missing from your files are reported but kept. Add `--prune` to delete them.
@@ -521,11 +539,23 @@ Execute read-only SQL queries directly against base data. Supports filtering, ag
 rekor sql "<query>" --base <ws> [--param key=value ...] [--file query.sql]
 ```
 
-**Tables**: `records`, `relationships`, `record_types`, `relationship_types`, `bases`, `operations_log`, `organization`
+**Tables**: `records`, `relationships`, `record_types`, `relationship_types`, `bases`, `operations_log`, `organization`, `audit_log`
 
-The `organization` table exposes org-level metadata (e.g. plan/status) and requires an `{org_id:String}` predicate instead of `{base_id:String}`.
+The `organization` table exposes org-level metadata (e.g. plan/status).
 
-**Important**: Always include BOTH `org_id = {org_id:String}` AND `base_id = {base_id:String}`, plus `deleted = false`. Both scoping predicates are mandatory — a base id is unique per-org, not globally, so `org_id` is required to isolate your data. Both placeholders are bound server-side from your authenticated org and base. The `records` table also carries `archived` and `cancelled` boolean columns — add `archived = false` to query only active records. Queries always see the latest version of each row — the server handles deduplication.
+Three tables have **no `base_id` column**, so bind `{base_id:String}` to the column that actually identifies the base:
+
+| Table | Base-scoping predicate |
+|---|---|
+| `bases` | `id = {base_id:String}` |
+| `operations_log` | `data.base_id.:String = {base_id:String}` |
+| `organization` | none — it is org-level, with no per-base row |
+
+`organization` therefore cannot be answered by this base-scoped endpoint; read it from the org-wide SQL surface (`POST /v1/orgs/{org_id}/sql`), which scopes by `{org_id:String}` alone. Keep `org_id = {org_id:String}` in all three cases.
+
+The `audit_log` table is the change history behind `rekor records history` — every version of every entity, with the actor. Any query referencing it (including via JOIN) is admin-gated the same way: organization owners/admins, or a token granted `read:audit`. It and `operations_log` are append-only, so neither takes a `deleted = false` predicate.
+
+**Important**: Always include BOTH `org_id = {org_id:String}` AND `base_id = {base_id:String}` (bound to the base-identifying column per the table above), plus `deleted = false` — except on the append-only `audit_log` and `operations_log`, which have no `deleted` column and reject the predicate. Both scoping predicates are mandatory — a base id is unique per-org, not globally, so `org_id` is required to isolate your data. Both placeholders are bound server-side from your authenticated org and base. The `records` table also carries `archived` and `cancelled` boolean columns — add `archived = false` to query only active records. Queries always see the latest version of each row — the server handles deduplication.
 
 **Accessing JSON fields**: Use `data.field.:Type` subcolumn syntax for the native JSON type. Use `CAST(data.field, 'Type')` when type-safe conversion is needed (e.g., integers stored as Int64 vs Float64).
 
