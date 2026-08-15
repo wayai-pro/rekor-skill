@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.79.0
+version: 1.80.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -83,7 +83,7 @@ Two schema→instance pairs anchor the model: **record type → record** and **r
 
 **Integration edges.** One `field_mapping` contract on a source is reused by every edge — proxied reads/writes, `external_write` out, inbound-webhook mapping/hydration in. Model entities canonically first, then pick edges per operation: the **Integration Modeling** section is the decision guide and pattern catalog.
 
-**Consistency & limits.** Single-record `get`s and eligible active-record `records query` / `query-relationships` lists reflect writes immediately; `sql`, `search`, and a few query shapes that read from recently-synced data (filters on the built-in `created_at`/`updated_at` timestamps without a timezone offset) may lag a write by a moment. Record/relationship JSON is capped at ~1 MiB — large or binary content belongs in Files.
+**Consistency & limits.** Single-record `get`s and eligible active-record `records query` / `query-relationships` lists reflect writes immediately; `sql`, `search`, and a few query shapes that read from recently-synced data (filters on the built-in `created_at`/`updated_at` timestamps without a timezone offset) may lag a write by a moment — and on a `local`-tier base (the default for an eval clone; see **Bases**) those same shapes are refused outright rather than lagging. Record/relationship JSON is capped at ~1 MiB — large or binary content belongs in Files.
 
 ## Task → Feature Map
 
@@ -228,7 +228,9 @@ The resulting preview base ID is `<id>--<preview-slug>`. Use that as `--base` fo
 
 The origin may be a production base **or another preview** — cloning a preview gives you `<preview-id>--<preview-slug>`, linked back to the preview it was cloned from.
 
-**If you created `<id>` as a preview in step 3 (free plan)**, this step still works, but it buys you little: a preview cloned from a preview promotes through its origin, never straight to production, and step 6's `promote` is paid-plan gated regardless. Simplest is to skip this step and work directly in `<id>` — steps 5 and 6 are unchanged if you pass `--base <id>` wherever **they** say `--base <id>--<preview-slug>`, which covers step 6's testing commands too. In step 6, **skip the `promote`**: there is no production base to promote to.
+A preview cloned from **another preview** is created on the `local` analytics tier, where `rekor sql` over records, `history` and relationship traversal are refused — see **Analytics tier** under Bases. Pass `--analytics standard` when cloning a preview origin for schema work you intend to query with `rekor sql` (step 6); the tier cannot be changed afterwards. Cloning a production origin is unaffected.
+
+**If you created `<id>` as a preview in step 3 (free plan)**, this step still works, but it buys you little: a preview cloned from a preview promotes through its origin, never straight to production, is created on the `local` tier described just above, and step 6's `promote` is paid-plan gated regardless. Simplest is to skip this step and work directly in `<id>` — steps 5 and 6 are unchanged if you pass `--base <id>` wherever **they** say `--base <id>--<preview-slug>`, which covers step 6's testing commands too. In step 6, **skip the `promote`**: there is no production base to promote to.
 
 ### 5. Define the first record_type
 
@@ -383,7 +385,9 @@ Two things purge does **not** remove: uploaded file contents (only the metadata 
 
 **Eval mode (`--integrations disabled`).** A preview can run with its **external integrations disabled** (default `enabled`). When disabled, every external edge goes inert — record_type sources, outbound `external_write` triggers, and inbound-webhook hydration — and the preview serves its own **seeded** data with the exact same schema, tools, and field mappings, **without calling the external systems**. That makes a preview a deterministic, prod-safe target for **agent evals**: exercise your agent's policy against the same canonical surface without polluting a production-only upstream or hitting live rate limits/PII. Seed it by writing records while disabled (writes to source-backed record_types land locally), flip to `enabled` to test the real integration, and re-clone from production to stay drift-free. **Production bases are always `enabled`** — the toggle is preview-only.
 
-**Analytics tier (`--analytics local`).** A preview can keep its data **out of the analytical store** entirely. On `local`, records and relationships live in the base itself and are never mirrored, which suits a disposable eval base whose data is garbage the moment the run ends.
+**Analytics tier (`--analytics`).** A preview can keep its data **out of the analytical store** entirely. On `local`, records and relationships live in the base itself and are never mirrored, which suits a disposable eval base whose data is garbage the moment the run ends.
+
+**A preview cloned from another preview is created on `local` by default** — that shape is the per-session eval clone. A preview cloned from a **production** base, and every base from `rekor bases create`, defaults to `standard`. Pass `--analytics` to choose explicitly on either path; it wins over the default.
 
 Two consequences, and the first is **data loss, not a read restriction**:
 
@@ -392,13 +396,24 @@ Two consequences, and the first is **data loss, not a read restriction**:
 
 Plan eval assertions around exact filters on `data.*` fields, and give any `created_at`/`updated_at` bound an explicit offset (`2026-08-01T00:00:00Z`).
 
+At a glance — what a `local` base does **not** serve, and what to use instead:
+
+| Not served on a `local` base | Instead |
+|---|---|
+| `rekor sql` over `records`, `relationships` or `audit_log` (and the toolset `sql_query` tool) | `records query` with the Filter DSL. Every other table — `record_types`, `relationship_types`, `bases`, `organization`, `operations_log` — still answers, though `operations_log` holds only billing rows on this tier |
+| `history` on any entity, and the audit endpoints | Nothing — history is never recorded for these bases, so there is no fallback |
+| Relationship traversal (`rekor query-relationships`, the toolset relationship-list tools) | The relationship list surface (`GET /v1/{base}/relationships?filter=…`), queried by endpoint id |
+| Filter conditions using `search`, or referencing `archived` | Exact/`like` conditions on `data.*`; archived rows are not a separate tier here |
+| Built-in `created_at`/`updated_at` compared to a value with **no timezone offset** | Give the bound an offset or `Z`. Your own `data.*` datetime fields are unaffected |
+| A list whose scope exceeds 10,000 live rows | Keep fixtures under the cap, or use a `standard` base |
+
 The tier is **fixed when the base is created** and preview-only. There is no switch in either direction — nothing reconciles the store across a change, so a base minted on the wrong tier can only be replaced (`--purge` plus a **new** id, since a purged id is retired). Set it deliberately at creation:
 
 ```bash
 rekor bases create-preview <origin> --name eval-run-42 --integrations disabled --analytics local --create-only
 ```
 
-Leave it unset for anything whose history or SQL you will want later.
+Pass `--analytics standard` instead for anything whose history or SQL you will want later — including a clone of a preview origin, which defaults to `local`. MCP `manage_base` `create_preview` takes the same `analytics` parameter. `create-preview` (and `rekor push` when it auto-creates from a preview `origin_base_id`) prints a warning if the new base landed on `local` while carrying a toolset that exposes `sql_query` or a relationship-list tool — those tools refuse there, permanently.
 
 ### Config as Code (pull / push)
 
@@ -414,7 +429,7 @@ rekor unbind                         # clear this worktree's base binding
 
 - **Previews are the only edit target.** `push` only writes **preview** bases (config is never edited directly in production). When you `pull` a preview, the linked production config is also written beside it as a **read-only reference** folder (`rekor-ws/bases/<prod>/`) so you can see the live production config while iterating — it's marked read-only (`push` refuses it and bare `pull`/`push` auto-selection ignores it). `pull <production>` directly writes only that read-only reference. To ship, run `rekor bases promote` as usual.
 - **Auto-create a preview.** Scaffold `rekor-ws/bases/<name>/base.yaml` with `origin_base_id: <prod-id>` (and no `base_id`); `rekor push` creates the preview from that production base, writes the new id back, and applies your files.
-- **`base.yaml` describes the base, it does not reconfigure it.** Alongside `base_id`/`origin_base_id`, `pull` records the base's `environment`, `integrations` and `analytics` there so the folder documents what it targets. Of these only the id fields drive `push`; the rest are descriptive, and the create-only `analytics` tier in particular can never be changed by editing this file. Set that tier when the base is created (`rekor bases create-preview --analytics local`), and treat a surprising value here as a signal to re-check the base, not to edit the file.
+- **`base.yaml` describes the base, it does not reconfigure it.** Alongside `base_id`/`origin_base_id`, `pull` records the base's `environment`, `integrations` and `analytics` there so the folder documents what it targets. For a folder that already has a `base_id` these are purely descriptive — editing them changes nothing, and the create-only `analytics` tier can never be changed this way; treat a surprising value as a signal to re-check the base, not to edit the file. **The one exception is `analytics` on the auto-create branch:** a new folder carrying `origin_base_id` and no `base_id` forwards its declared tier to the base `push` creates, and that is your only chance to set it there. Declare `analytics: standard` before the first `push` if the origin is a preview (whose clones default to `local`) and you will want SQL, history or traversal.
 - **Worktree binding (routing guard).** Each git checkout (main or linked worktree) can be bound to one base. `pull`/`push` refuse to run against a different base once bound — catching the common mistake of a prompt landing in the wrong terminal/worktree and clobbering another preview's config. The binding is set automatically on the first successful `pull`/`push` into an unbound checkout (and on creating a new preview), is per-worktree and never committed, and complements `.rekor.yaml` (which pins the org repo-wide). `rekor status` shows the current binding. **If `pull`/`push` errors with a binding mismatch, stop and ask the user before doing anything else** — it usually means the prompt was meant for a different worktree. Do **not** run `rekor unbind` / `rekor use` without explicit user instruction in the current session; changing the binding is a routing decision, like switching which base the user thinks you're working on.
 - **Secrets are never written to files.** Inbound-webhook/trigger and external-source secrets are stripped on `pull`. On `push`, a newly added inbound webhook/trigger gets a fresh secret (printed once — save it); existing secrets are left untouched. Manage secret values with `rekor inbound-webhooks` / `rekor triggers` / `rekor secrets`.
 - **Deletions are opt-in.** Because deleting a record_type also removes its records, `push` is additive by default: entities missing from your files are reported but kept. Add `--prune` to delete them.
@@ -445,11 +460,11 @@ rekor records delete <record_type> <id> --base <ws>
 rekor records history <id> --base <ws> [--limit <n>] [--offset <n>] [--diff]
 ```
 
-`history` returns the full change history for an entity — every version as a snapshot, who changed it, the operation, and when. Admin-only: available to organization owners/admins or a token granted `read:audit`; ordinary agent tokens are rejected. (Same `history` subcommand exists on `relationships`, `record_types`, and `relationship-types`.)
+`history` returns the full change history for an entity — every version as a snapshot, who changed it, the operation, and when. Admin-only: available to organization owners/admins or a token granted `read:audit`; ordinary agent tokens are rejected. (Same `history` subcommand exists on `relationships`, `record_types`, and `relationship-types`.) Change history is not kept on a `local`-tier eval clone — see **Bases → Analytics tier**.
 
 **Filtering & search.** `query` (REST `GET /records/<record_type>`, MCP `query_records`) takes a Filter DSL expression — a condition `{field, op, value}` or an `and`/`or` group of them. Operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`, `not_in`, `like`, `ilike`, `is_null`, `is_not_null`, `has`, and **`search`**. This DSL is the only accepted form — Mongo-style shorthand (`{"data.field":"value"}`, `{"field":{"$in":[...]}}`) is **not** supported.
 
-Listing and filtering active records (and relationships) is **read-after-write consistent** — a record you just wrote appears in the very next list, no lag. A few query shapes instead read from recently-synced data (so a just-written record may take a brief moment to appear): `search` queries (see below) and filters comparing the built-in `created_at`/`updated_at` timestamps to a value written without a timezone offset. (Requesting a projected subset of fields does not by itself change this — projection is never what moves a query onto the recently-synced path.)
+Listing and filtering active records (and relationships) is **read-after-write consistent** — a record you just wrote appears in the very next list, no lag. A few query shapes instead read from recently-synced data (so a just-written record may take a brief moment to appear): `search` queries (see below) and filters comparing the built-in `created_at`/`updated_at` timestamps to a value written without a timezone offset. (Requesting a projected subset of fields does not by itself change this — projection is never what moves a query onto the recently-synced path.) On a `local`-tier base — what a preview cloned from another preview is created as, see **Bases → Analytics tier** — there is no recently-synced copy at all, so both shapes are refused with an error instead of lagging.
 
 `search` matches a field by **approximate** value — use it when you have a near-correct string but not the exact stored one (e.g. a model name, a place, a plan name, a SKU with a possible typo). Results come back **ranked by closeness**, each carrying a `_search_score` (0–1, higher = closer):
 
@@ -556,6 +571,8 @@ Three tables have **no `base_id` column**, so bind `{base_id:String}` to the col
 The `audit_log` table is the change history behind `rekor records history` — every version of every entity, with the actor. Any query referencing it (including via JOIN) is admin-gated the same way: organization owners/admins, or a token granted `read:audit`. It and `operations_log` are append-only, so neither takes a `deleted = false` predicate.
 
 **Important**: Always include BOTH `org_id = {org_id:String}` AND `base_id = {base_id:String}` (bound to the base-identifying column per the table above), plus `deleted = false` — except on the append-only `audit_log` and `operations_log`, which have no `deleted` column and reject the predicate. Both scoping predicates are mandatory — a base id is unique per-org, not globally, so `org_id` is required to isolate your data. Both placeholders are bound server-side from your authenticated org and base. The `records` table also carries `archived` and `cancelled` boolean columns — add `archived = false` to query only active records. Queries always see the latest version of each row — the server handles deduplication.
+
+**Eval clones**: a preview cloned from another preview runs on the `local` analytics tier, where SQL over `records`, `relationships` and `audit_log` is refused; every other table still answers — see **Bases → Analytics tier**.
 
 **Accessing JSON fields**: Use `data.field.:Type` subcolumn syntax for the native JSON type. Use `CAST(data.field, 'Type')` when type-safe conversion is needed (e.g., integers stored as Int64 vs Float64).
 
@@ -1076,7 +1093,7 @@ rekor record-types upsert invoices --base my-base--add-invoices --name "Invoices
 #    rekor bases promote my-base --from my-base--add-invoices
 ```
 
-If `my-base` is itself a preview (the free-plan shape — `rekor bases create <id> --environment preview`), step 1 still works — `create-preview` clones from a preview origin too — but step 3 does not: the promote is paid-plan gated, and a preview cloned from a preview promotes through its origin rather than straight to production. Make the config writes directly against `my-base` and stop there.
+If `my-base` is itself a preview (the free-plan shape — `rekor bases create <id> --environment preview`), step 1 still works — `create-preview` clones from a preview origin too — but step 3 does not: the promote is paid-plan gated, and a preview cloned from a preview promotes through its origin rather than straight to production. That clone is also created on the `local` analytics tier, permanently (see **Bases → Analytics tier**), so it cannot serve `rekor sql`, `history` or traversal unless you pass `--analytics standard`. Make the config writes directly against `my-base` and stop there.
 
 ## Modeling Principles for Agent Consumption
 
