@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.80.0
+version: 1.81.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -40,7 +40,7 @@ This file is self-contained on concepts: **The Rekor Object Model** defines ever
 Read this once — it is the complete concept set. Every setup task is a combination of these pieces; the **Full Command Reference** below gives the commands and rules, and the bundled `references/` files the deep grammar.
 
 ```
-Organization                      ← account boundary; members, API tokens, vault secrets
+Organization                      ← account boundary; API tokens, vault secrets
 └── Base (production | preview)   ← top-level data container: one per app, domain, or tenant
     ├── CONFIG — edit in PREVIEW, ship with PROMOTE (human-run):
     │     record types (+ their external sources) · relationship types · file types
@@ -58,7 +58,7 @@ Two schema→instance pairs anchor the model: **record type → record** and **r
 
 | Primitive | What it is | Commands / section |
 |---|---|---|
-| **Organization** | Account boundary owning bases, tokens, and secrets; bound to the repo by `rekor init` (override with `--org` / `REKOR_ORG`) | `rekor init` |
+| **Organization** | Account boundary owning bases, tokens, and secrets; a `rec_` key is scoped to exactly one and cannot be pointed at another (`--org` / `REKOR_ORG` are inert) | — |
 | **Base** | Top-level data container. `production` (its config entities change only via promote; metadata like name/tags/timezone stays editable) or `preview` (`<prod>--<slug>`, a config-editable clone that promotes back to its origin) | `rekor bases` |
 | **Record type** | JSON Schema defining a record type — created at runtime, no migrations. Carries schema hints (`x-fk` foreign keys, `x-search` tuning, `x-archival` mode, `x-timezone`, `x-ui` display) and optionally declares **external sources** | `rekor record-types` |
 | **Record** | JSON row conforming to its record type. System-generated `id` plus your `external_id`/`external_source` for **idempotent upsert** (re-upsert updates in place). Can be **cancelled** (first-class state) or **archived** (terminal/inactive) | `rekor records` |
@@ -156,27 +156,30 @@ Verify with `rekor --version`. The CLI is published to npm as `rekor-cli`; the b
 
 ### 2. Authenticate
 
-If the user has a Rekor account:
-
-```bash
-rekor login
-```
-
-Opens a browser to complete OAuth. For headless or CI use, pass an existing API key:
+Authenticate with an API key:
 
 ```bash
 rekor login --token rec_xxx
 ```
 
-If the user does **not** have an account yet, direct them to [rekor.pro](https://rekor.pro) — free plan includes 5,000 operations per month, no credit card required.
+**An API key is the only credential this API accepts.** Browser sign-in (`rekor login` with no
+`--token`) is retired: the backend no longer verifies any browser or OAuth credential, so a session
+obtained that way is rejected on every subsequent command. Get a key from whoever manages the
+account — the platform that owns your organization issues them, and each key is already scoped to
+exactly one organization.
 
-After logging in with a user account, bind this repo to an organization so the CLI knows which one to operate in:
+`rekor init` is retired with it. It existed to bind a repo to one of *your* organizations, which
+required a user login to enumerate them; a `rec_` key carries its organization already, so there is
+nothing to choose.
 
-```bash
-rekor init
-```
+**The organization is the key, and nothing overrides it.** An existing committed `.rekor.yaml`, the
+`--org` flag and `REKOR_ORG` all feed one request header the server no longer reads, so they change
+nothing — passing `--org` for an organization your key was not minted in operates on the key's own
+organization and reports no error. To work in a different organization, use a key minted there
+(`REKOR_TOKEN`, or `rekor login --token`).
 
-This writes a committed `.rekor.yaml` at the repo root (auto-selecting your org if you have only one, otherwise prompting). It's required before creating bases, tokens, or secrets — and before `pull`/`push` — with a user login; if you have a single organization, `rekor init` selects it automatically. Override per command with `--org <id>` or `REKOR_ORG`. API keys (`rec_…`) are already scoped to one organization and skip this step.
+If the user has no organization yet, they get one from the platform that manages their account —
+self-serve signup here is retired. The free plan includes 5,000 operations per month.
 
 ### 3. Create a base
 
@@ -430,7 +433,7 @@ rekor unbind                         # clear this worktree's base binding
 - **Previews are the only edit target.** `push` only writes **preview** bases (config is never edited directly in production). When you `pull` a preview, the linked production config is also written beside it as a **read-only reference** folder (`rekor-ws/bases/<prod>/`) so you can see the live production config while iterating — it's marked read-only (`push` refuses it and bare `pull`/`push` auto-selection ignores it). `pull <production>` directly writes only that read-only reference. To ship, run `rekor bases promote` as usual.
 - **Auto-create a preview.** Scaffold `rekor-ws/bases/<name>/base.yaml` with `origin_base_id: <prod-id>` (and no `base_id`); `rekor push` creates the preview from that production base, writes the new id back, and applies your files.
 - **`base.yaml` describes the base, it does not reconfigure it.** Alongside `base_id`/`origin_base_id`, `pull` records the base's `environment`, `integrations` and `analytics` there so the folder documents what it targets. For a folder that already has a `base_id` these are purely descriptive — editing them changes nothing, and the create-only `analytics` tier can never be changed this way; treat a surprising value as a signal to re-check the base, not to edit the file. **The one exception is `analytics` on the auto-create branch:** a new folder carrying `origin_base_id` and no `base_id` forwards its declared tier to the base `push` creates, and that is your only chance to set it there. Declare `analytics: standard` before the first `push` if the origin is a preview (whose clones default to `local`) and you will want SQL, history or traversal.
-- **Worktree binding (routing guard).** Each git checkout (main or linked worktree) can be bound to one base. `pull`/`push` refuse to run against a different base once bound — catching the common mistake of a prompt landing in the wrong terminal/worktree and clobbering another preview's config. The binding is set automatically on the first successful `pull`/`push` into an unbound checkout (and on creating a new preview), is per-worktree and never committed, and complements `.rekor.yaml` (which pins the org repo-wide). `rekor status` shows the current binding. **If `pull`/`push` errors with a binding mismatch, stop and ask the user before doing anything else** — it usually means the prompt was meant for a different worktree. Do **not** run `rekor unbind` / `rekor use` without explicit user instruction in the current session; changing the binding is a routing decision, like switching which base the user thinks you're working on.
+- **Worktree binding (routing guard).** Each git checkout (main or linked worktree) can be bound to one base. `pull`/`push` refuse to run against a different base once bound — catching the common mistake of a prompt landing in the wrong terminal/worktree and clobbering another preview's config. The binding is set automatically on the first successful `pull`/`push` into an unbound checkout (and on creating a new preview), is per-worktree and never committed. `rekor status` shows the current binding. **If `pull`/`push` errors with a binding mismatch, stop and ask the user before doing anything else** — it usually means the prompt was meant for a different worktree. Do **not** run `rekor unbind` / `rekor use` without explicit user instruction in the current session; changing the binding is a routing decision, like switching which base the user thinks you're working on.
 - **Secrets are never written to files.** Inbound-webhook/trigger and external-source secrets are stripped on `pull`. On `push`, a newly added inbound webhook/trigger gets a fresh secret (printed once — save it); existing secrets are left untouched. Manage secret values with `rekor inbound-webhooks` / `rekor triggers` / `rekor secrets`.
 - **Deletions are opt-in.** Because deleting a record_type also removes its records, `push` is additive by default: entities missing from your files are reported but kept. Add `--prune` to delete them.
 - **Record base context in `AGENTS.md`.** On `pull`/`push`, Rekor seeds (create-if-absent, never overwriting your edits) an `AGENTS.md` + a one-line `CLAUDE.md` `@AGENTS.md` shim in each base folder (`rekor-ws/bases/<db>/`). Use the base folder's `AGENTS.md` to capture what the config itself can't: the base's **purpose**, **key decisions and why**, **business rules**, **terminology**, and **integration quirks**. Keep it current as the base evolves — it's the durable memory the next agent reads before touching this data layer. If the files are missing (e.g. an older pull), create them yourself in the same shape.
@@ -460,7 +463,7 @@ rekor records delete <record_type> <id> --base <ws>
 rekor records history <id> --base <ws> [--limit <n>] [--offset <n>] [--diff]
 ```
 
-`history` returns the full change history for an entity — every version as a snapshot, who changed it, the operation, and when. Admin-only: available to organization owners/admins or a token granted `read:audit`; ordinary agent tokens are rejected. (Same `history` subcommand exists on `relationships`, `record_types`, and `relationship-types`.) Change history is not kept on a `local`-tier eval clone — see **Bases → Analytics tier**.
+`history` returns the full change history for an entity — every version as a snapshot, who changed it, the operation, and when. Admin-only: available to platform admins or a token granted `read:audit`; ordinary agent tokens are rejected. (Same `history` subcommand exists on `relationships`, `record_types`, and `relationship-types`.) Change history is not kept on a `local`-tier eval clone — see **Bases → Analytics tier**.
 
 **Filtering & search.** `query` (REST `GET /records/<record_type>`, MCP `query_records`) takes a Filter DSL expression — a condition `{field, op, value}` or an `and`/`or` group of them. Operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`, `not_in`, `like`, `ilike`, `is_null`, `is_not_null`, `has`, and **`search`**. This DSL is the only accepted form — Mongo-style shorthand (`{"data.field":"value"}`, `{"field":{"$in":[...]}}`) is **not** supported.
 
@@ -556,7 +559,7 @@ rekor sql "<query>" --base <ws> [--param key=value ...] [--file query.sql]
 
 **Tables**: `records`, `relationships`, `record_types`, `relationship_types`, `bases`, `operations_log`, `organization`, `audit_log`
 
-The `organization` table exposes org-level metadata (e.g. plan/status).
+The `organization` table exposes org-level metadata. Its `plan` and `status` columns are **not maintained and carry no billing meaning** — your plan belongs to the platform that manages your account, not here. Do not read them as an entitlement; depending on when the org was created they hold either an empty string or a stale default.
 
 Three tables have **no `base_id` column**, so bind `{base_id:String}` to the column that actually identifies the base:
 
@@ -568,7 +571,7 @@ Three tables have **no `base_id` column**, so bind `{base_id:String}` to the col
 
 `organization` therefore cannot be answered by this base-scoped endpoint; read it from the org-wide SQL surface (`POST /v1/orgs/{org_id}/sql`), which scopes by `{org_id:String}` alone. Keep `org_id = {org_id:String}` in all three cases.
 
-The `audit_log` table is the change history behind `rekor records history` — every version of every entity, with the actor. Any query referencing it (including via JOIN) is admin-gated the same way: organization owners/admins, or a token granted `read:audit`. It and `operations_log` are append-only, so neither takes a `deleted = false` predicate.
+The `audit_log` table is the change history behind `rekor records history` — every version of every entity, with the actor. Any query referencing it (including via JOIN) is admin-gated the same way: platform admins, or a token granted `read:audit`. It and `operations_log` are append-only, so neither takes a `deleted = false` predicate.
 
 **Important**: Always include BOTH `org_id = {org_id:String}` AND `base_id = {base_id:String}` (bound to the base-identifying column per the table above), plus `deleted = false` — except on the append-only `audit_log` and `operations_log`, which have no `deleted` column and reject the predicate. Both scoping predicates are mandatory — a base id is unique per-org, not globally, so `org_id` is required to isolate your data. Both placeholders are bound server-side from your authenticated org and base. The `records` table also carries `archived` and `cancelled` boolean columns — add `archived = false` to query only active records. Queries always see the latest version of each row — the server handles deduplication.
 
@@ -786,7 +789,7 @@ rekor import list [--limit <n>] [--offset <n>] --base prod     # sessions, newes
 rekor import rollback <import_id> --base prod                  # undo (prompts only in a terminal)
 ```
 
-`run` prints the `request_key` it generated. Keep it: if the run dies partway, `rekor import run … --request-key <key> --start-chunk <n>` resumes from that chunk instead of re-sending the file. **Pass the same `--chunk-size` you used originally** — chunk numbers are derived from it, so resuming under a different size would point index N at different rows; the CLI requires the flag explicitly whenever you use `--start-chunk`. If a run stops partway it tells you the chunk index to resume at — re-run the *same* command with the `--start-chunk`/`--chunk-size`/`--request-key` it prints and every other flag unchanged. Do not retype the command from scratch: a too-high `--start-chunk` skips rows silently, and dropping `--base` or `--org` resumes into a different base entirely. `--chunk-size` is ≤1,000; `--no-finalize` leaves the session open for a later resume.
+`run` prints the `request_key` it generated. Keep it: if the run dies partway, `rekor import run … --request-key <key> --start-chunk <n>` resumes from that chunk instead of re-sending the file. **Pass the same `--chunk-size` you used originally** — chunk numbers are derived from it, so resuming under a different size would point index N at different rows; the CLI requires the flag explicitly whenever you use `--start-chunk`. If a run stops partway it tells you the chunk index to resume at — re-run the *same* command with the `--start-chunk`/`--chunk-size`/`--request-key` it prints and every other flag unchanged. Do not retype the command from scratch: a too-high `--start-chunk` skips rows silently, and dropping `--base` resumes into a different base entirely. (`--org` is inert — the key decides the organization.) `--chunk-size` is ≤1,000; `--no-finalize` leaves the session open for a later resume.
 
 **If you are driving it yourself** rather than using the CLI — a language runtime, a scheduled job — the REST surface is:
 
@@ -1025,7 +1028,7 @@ Set `--expires-at` (ISO-8601) on credentials that lapse — yearly certificates,
 ### Account & Diagnostics
 
 ```bash
-rekor init                   # Bind this repo to an organization (writes .rekor.yaml — see First-Time Setup)
+# `rekor init` is retired — a rec_ key already carries its organization (see First-Time Setup)
 rekor whoami                 # Show the authenticated identity
 rekor status                 # Auth, connectivity, active org, worktree binding, CLI version
 rekor update                 # Update the CLI to the latest published version
@@ -1059,7 +1062,9 @@ rekor report accept <report_id>           # the shipped fix works → resolved
 rekor report contest <report_id> --reason "still reproduces because ..."   # the fix didn't work, or a dismissal is wrong → back to the team
 ```
 
-**The defect verification loop.** After the team escalates a defect and a fix ships, your report moves to `shipped` — you'll get an email, and `rekor login`/`rekor status` remind you once (or find it by title with `rekor report list --status shipped`). Read `rekor report get <id>` (the original title and description, current status, and the team's note), then `accept` if it works or `contest --reason "..."` if it doesn't. Enhancements move directly to `addressed` when their issue closes because there is no defect fix to verify. You can also `contest` a `dismissed` report you believe is real — it routes back to the team. Contests are bounded (a cap, and the team may mark a dismissal final); past those, contact support. You can only list/read/act on human-filed reports **you** filed; agent-authored reports stay in the admin triage queue.
+**The defect verification loop.** ⚠️ **Currently unreachable from the CLI.** `report list/get/accept/contest` are user-scoped — they resolve the caller to the person who filed the report — and an API key identifies an organization, not a person, so these four commands are rejected. Filing (`rekor report create`) still works. Follow up on a filed report through whoever manages your account until the user-scoped surface returns. The rest of this paragraph describes the loop as designed:
+
+After the team escalates a defect and a fix ships, your report moves to `shipped` — you'll get an email, and `rekor status` reminds you once (or find it by title with `rekor report list --status shipped`). Read `rekor report get <id>` (the original title and description, current status, and the team's note), then `accept` if it works or `contest --reason "..."` if it doesn't. Enhancements move directly to `addressed` when their issue closes because there is no defect fix to verify. You can also `contest` a `dismissed` report you believe is real — it routes back to the team. Contests are bounded (a cap, and the team may mark a dismissal final); past those, contact support. You can only list/read/act on human-filed reports **you** filed; agent-authored reports stay in the admin triage queue.
 
 ---
 
