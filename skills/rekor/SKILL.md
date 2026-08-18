@@ -1,6 +1,6 @@
 ---
 name: rekor
-version: 1.81.0
+version: 1.82.0
 description: |
   Set up and operate Rekor — a headless system of record for AI agents. Use when:
   installing the `rekor` CLI, authenticating, creating a base, defining record_types,
@@ -71,8 +71,8 @@ Two schema→instance pairs anchor the model: **record type → record** and **r
 | **External source** | Declared **on a record type**: backs its CRUD operations with an external API through one bidirectional `field_mapping` contract | External Sources |
 | **Trigger** | Fires on record/relationship/file events. Its action: signed **webhook** out, **internal_write** (guarded patch to a related record), or **external_write** (push the change upstream through a source) | `rekor triggers` |
 | **Inbound webhook** | Signed ingest URL an external system pushes to — payload stored raw, translated via a mapping, or **hydrated** (thin "id changed" notification → Rekor fetches the full record through a bound source) | `rekor inbound-webhooks` |
-| **Executor** | A small HTTP service **you** deploy for what Rekor can't call directly (custom logic, mTLS, SOAP, binary creds); receives signed dispatches, verified with `rekor-sdk` | Executors |
-| **Signing v1** | The HMAC request signature on trigger deliveries, executor-bound source calls (opt-in `signing`), and inbound-webhook verification (the default scheme) — one wire format, both directions; `rekor-sdk` implements it, never hand-roll | Executors, Inbound Webhooks |
+| **Executor** | A small HTTP service **you** deploy for what Rekor can't call directly (custom logic, mTLS, SOAP, binary creds); receives signed dispatches, verified with `@wayai/executor-sdk` | Executors |
+| **Signing v1** | The HMAC request signature on trigger deliveries, executor-bound source calls (opt-in `signing`), and inbound-webhook verification (the default scheme) — one wire format, both directions; `@wayai/executor-sdk` implements it, never hand-roll | Executors, Inbound Webhooks |
 | **Action** | One record type + one operation, shaped and guarded (`filterable_fields`, `writable_fields`, `precondition`, `binding`) — or a **composite** of atomic multi-record steps. Its id is the agent-facing tool name | `rekor actions` |
 | **Toolset** | A curated MCP server composed of Action references (plus relationship/batch/SQL tools), served at `mcp.rekor.pro/t/<slug>/mcp` | `rekor toolsets` |
 | **Seed fixture / lease** | Named, reversible records+relationships baseline for hermetic agent evals. Definitions are config; `apply`/`reset`/`clear` are preview-only data operations. An actor-bound lease exclusively resets, owns, and clears fixture state for one eval run | `rekor seed`, `rekor seed lease` |
@@ -107,7 +107,7 @@ Route any request to the right feature, then jump to that section of the command
 | Accept full-payload pushes from outside | inbound webhook (+ optional field mapping) | Inbound Webhooks |
 | Turn "record X changed" pings into full records | hydrating inbound webhook (+ `merge` to keep your fields) | Inbound Webhooks |
 | Read/write an external API as if it were native | external sources on the record type | External Sources |
-| Integrate something Rekor can't call directly | executor + `rekor-sdk` | Executors |
+| Integrate something Rekor can't call directly | executor + `@wayai/executor-sdk` | Executors |
 | Give an LLM agent safe, domain-named tools | Actions + toolset + toolset-bound token | MCP Factory |
 | Make a state-dependent write race-free | Action `precondition` (compare-and-set) | MCP Factory |
 | One agent tool = several writes, atomic | composite Action | MCP Factory |
@@ -130,7 +130,7 @@ The bundled `references/` files carry the full option grammar — read the match
 | `references/querying.md` | Writing non-trivial SQL, tuning `search`, setting timezones | SQL example gallery (arrays, `ARRAY JOIN`, CTEs, `--param`, fuzzy ranking), `x-search` modes/threshold, datetime & timezone configuration |
 | `references/external-sources.md` | Configuring any external source | Full source grammar: `field_mapping` rules (value maps, transforms, split/destructure/computed, per-op overrides), per-op endpoints, named write bindings, `id_path` variants, `forward_filters`, `local_filters`, body shaping, `{{current.*}}`/`{{prior.*}}`, caching/signing/timeout/breaker, SSRF rules, a worked legacy-upstream example |
 | `references/mcp-factory.md` | Authoring Actions or toolsets beyond the defaults | Full Action + toolset grammar: `filterable_fields` (incl. `optional`), `expose_*`/`default_*`, `writable_fields`, `base_filter`, `precondition`, `binding`, composite Actions, tool naming, which base serves a toolset slug |
-| `references/executors.md` | Building or deploying an executor | The `rekor-sdk` contract (verify, dedupe, error envelope), signed write-back, where to host, the vault certificate pull pattern, local dev, retries |
+| `references/executors.md` | Building or deploying an executor | The `@wayai/executor-sdk` contract (verify, dedupe, error envelope), signed write-back, where to host, the vault certificate pull pattern, local dev, retries |
 | `references/providers.md` | Importing/exporting provider tool definitions | Exact `rekor providers` command forms per provider (OpenAI/Anthropic/Google/MCP) |
 
 At runtime you can also consult:
@@ -662,13 +662,13 @@ rekor inbound-webhooks get <id> --base <ws>
 rekor inbound-webhooks delete <id> --base <ws>
 ```
 
-`--secret` is the shared secret (required). By default the sender signs ingest requests and Rekor verifies an HMAC: either **Signing v1** — `X-Rekor-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Rekor-Timestamp` Rekor checks for freshness (the same scheme triggers and proxied calls use, so one signer works both directions) — or a legacy body-only HMAC for older senders. A v1 delivery is idempotent: a duplicate (a retry or replay carrying the same `X-Rekor-Id`) replays the first response instead of writing again. For senders that authenticate with a **static per-account header** instead of signing each request, `--ingest-auth '{"type":"static_header","header":"X-Account-Key"}'` verifies that header's value against `--secret` (constant-time) — Rekor compares the configured header rather than a signature. `--record_type-scope` restricts which record_types the inbound webhook may write to (omit for all). Inbound webhooks can only be created/deleted in preview bases. Promote to production when ready.
+`--secret` is the shared secret (required). By default the sender signs ingest requests and Rekor verifies an HMAC: either **Signing v1** — `X-Data-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Data-Timestamp` Rekor checks for freshness (the same scheme triggers and proxied calls use, so one signer works both directions) — or a legacy body-only HMAC for older senders. A v1 delivery is idempotent: a duplicate (a retry or replay carrying the same `X-Data-Id`) replays the first response instead of writing again. For senders that authenticate with a **static per-account header** instead of signing each request, `--ingest-auth '{"type":"static_header","header":"X-Account-Key"}'` verifies that header's value against `--secret` (constant-time) — Rekor compares the configured header rather than a signature. `--record_type-scope` restricts which record_types the inbound webhook may write to (omit for all). Inbound webhooks can only be created/deleted in preview bases. Promote to production when ready.
 
 **Translate the received payload before write.** By default an inbound webhook stores the payload as-is. To store **canonical** records straight from an external system's raw shape, attach a mapping — the same `field_mapping` contract external sources use (renames, value maps, date reformatting, computed/compose), applied in the inbound direction:
 - `--source-binding '{"record_type":"<id>","source":"<name>"}'` reuses an existing source's `field_mapping`, so the same translation that proxies that record_type's reads/writes also canonicalizes inbound deliveries — one contract, both directions.
-- `--field-mapping '{"to_external":{"status":"state"}}'` is an inline mapping for a purely-native record_type with no source. `to_external` renames auto-invert on read (upstream `state` → Rekor `status`); or give `to_rekor`/`computed` explicitly.
+- `--field-mapping '{"to_external":{"status":"state"}}'` is an inline mapping for a purely-native record_type with no source. `to_external` renames auto-invert on read (upstream `state` → Rekor `status`); or give `to_record`/`computed` explicitly.
 
-The two are mutually exclusive. The mapping is validated when the webhook is created and again at promotion (a `source_binding` must still resolve to a source that has a `field_mapping`). This makes an executor-free **native-mirror sync** complete: pair an inbound webhook's `to_rekor` with an `external_write` trigger's `to_external` to keep a native record_type in sync with a plain-HTTP upstream in both directions, reusing a single source contract.
+The two are mutually exclusive. The mapping is validated when the webhook is created and again at promotion (a `source_binding` must still resolve to a source that has a `field_mapping`). This makes an executor-free **native-mirror sync** complete: pair an inbound webhook's `to_record` with an `external_write` trigger's `to_external` to keep a native record_type in sync with a plain-HTTP upstream in both directions, reusing a single source contract.
 
 **Hydrating webhooks (notification + fetch).** Many systems send *reference-style* webhooks — "record X changed, here is its id" — instead of the full record (Stripe recommends re-fetching by id; Shopify, Salesforce, HubSpot, legacy CRMs do the same). Point such a webhook at a record_type's read source and Rekor will **fetch the full record itself** on each delivery, then store the canonical record:
 
@@ -709,7 +709,7 @@ rekor triggers deliveries --base <ws> [--status <pending|delivered|failed|dead>]
 
 Add `--filter '<json>'` to fire only on records matching a condition — the same filter DSL queries use, evaluated against the record (or relationship) being written, e.g. `--filter '{"field":"data.status","op":"eq","value":"paid"}'` fires only when `status` is `paid`. Combine conditions with `and`/`or` groups. A malformed filter is rejected at create time.
 
-Triggers are HMAC-signed (`X-Rekor-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Rekor-Timestamp` the receiver checks for freshness — the same scheme proxied requests use) and carry `X-Rekor-Id`/`X-Rekor-Delivery-Id` for receiver dedupe. Delivery is reliable — failed attempts are retried with backoff and dead-lettered after repeated failure; inspect status with `rekor triggers deliveries`. By default, writes from inbound webhooks don't re-fire triggers (`skip_inbound_webhook_writes: true`). Triggers can only be created/deleted in preview bases.
+Triggers are HMAC-signed (`X-Data-Signature: v1,<hex>` over id+timestamp+method+path+body, with an `X-Data-Timestamp` the receiver checks for freshness — the same scheme proxied requests use) and carry `X-Data-Id`/`X-Data-Delivery-Id` for receiver dedupe. Delivery is reliable — failed attempts are retried with backoff and dead-lettered after repeated failure; inspect status with `rekor triggers deliveries`. By default, writes from inbound webhooks don't re-fire triggers (`skip_inbound_webhook_writes: true`). Triggers can only be created/deleted in preview bases.
 
 ### Executors (acting on the outside world)
 
@@ -717,10 +717,10 @@ Rekor records, signs, and dispatches — but the actual outside-world action (ca
 
 **Do you even need one?** A plain REST/JSON API → just an external source (no executor) — and the same source's write path can be reused *outbound* by an `external_write` trigger, so mirroring a native record_type to a plain-HTTP upstream needs no executor either. Build an executor only when a trigger runs custom logic, or a source call can't be a direct HTTP request (mTLS, SOAP, binary creds, heavy processing). Inbound webhooks go the other way — your executor calls an inbound webhook to write results back in.
 
-**Always receive these requests with the `rekor-sdk` package — never hand-roll signature verification** (a mistake lets anyone forge a request to your executor). The SDK verifies the signature + timestamp, dedupes retries on the idempotency key, and normalizes errors — you write one handler:
+**Always receive these requests with the `@wayai/executor-sdk` package — never hand-roll signature verification** (a mistake lets anyone forge a request to your executor). The SDK verifies the signature + timestamp, dedupes retries on the idempotency key, and normalizes errors — you write one handler:
 
 ```ts
-import { createExecutor, toFetchHandler } from 'rekor-sdk'
+import { createExecutor, toFetchHandler } from '@wayai/executor-sdk'
 const handler = toFetchHandler(createExecutor({
   secret: process.env.REKOR_SIGNING_SECRET!,
   handler: async (ctx) => { /* ctx.body is verified; do the work, return a result or nothing */ },
@@ -747,7 +747,7 @@ Each source defines the menu below (full grammar, every option's rules, and a wo
 
 - `name` — must equal the record's `external_source`.
 - `auth` — header + value template; secret inline or `vault:<name>`. An **inline** secret is environment-local — promotion never copies it, so set it on production directly (a newly promoted source stays unconfigured, requests fail with a clear error, until you do). A `vault:<name>` reference travels by reference.
-- `field_mapping` — **optional** (omit for identity passthrough). `to_external`/`to_rekor` map between your schema and the upstream's field names — a simple rename or a rich rule (`transform`, `values` [always Rekor-keyed], `default`, `date_format`, `array_mode`, `target`). Advanced shapes: **split** one field to several params (`targets`), **destructure** a composite value (`separator`+`parts`), **compose** a Rekor field from several upstream fields (`computed` templates), and **per-operation overrides**.
+- `field_mapping` — **optional** (omit for identity passthrough). `to_external`/`to_record` map between your schema and the upstream's field names — a simple rename or a rich rule (`transform`, `values` [always Rekor-keyed], `default`, `date_format`, `array_mode`, `target`). Advanced shapes: **split** one field to several params (`targets`), **destructure** a composite value (`separator`+`parts`), **compose** a Rekor field from several upstream fields (`computed` templates), and **per-operation overrides**.
 - `get` / `list` / `create` / `update` / `delete` — per-operation endpoint templates, each with its own `url` (tokens `{{external_id}}`, `{{query.*}}`, `{{data.*}}`, `{{current.*}}`/`{{prior.*}}`, `{{auth.*}}`) and `method` — so RPC-style verb paths and all-POST upstreams work directly. `response_path`/`total_path`/`success_path`/`message_path` unwrap envelopes.
 - **Named write bindings** (`create`/`update`/`delete`) — declare a write op as a map of named endpoint variants when one canonical entity's writes fan out to several backend endpoints; the caller picks one by name (via a tool's `bindings`), keeping ONE record_type.
 - `id_path` — where the `external_id` lives in each raw upstream record (dot-path, composite template, or create-only/request-templated variants) for upstreams not keyed on `id`.

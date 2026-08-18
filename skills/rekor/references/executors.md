@@ -27,18 +27,18 @@ mapping — **no executor required**. Build an executor only when:
 
 An executor always *receives* Rekor's outbound dispatches (triggers and external sources). **Inbound webhooks are the
 reverse direction** — your executor calls an inbound webhook to write results back *into* Rekor, which Rekor
-receives. One `rekor-sdk` covers both sides: `createExecutor` verifies what Rekor sent you; `signRequest`
+receives. One `@wayai/executor-sdk` covers both sides: `createExecutor` verifies what Rekor sent you; `signRequest`
 signs what you send back.
 
-## The one rule: never hand-roll verification — use `rekor-sdk`
+## The one rule: never hand-roll verification — use `@wayai/executor-sdk`
 
 Every dispatched request is HMAC-signed and carries a timestamp and an idempotency key. Verifying that
 correctly (constant-time compare, timestamp skew, signature-list rotation, exact body bytes) is easy to
-get subtly wrong, and a mistake means anyone can forge a request to your executor. The `rekor-sdk`
+get subtly wrong, and a mistake means anyone can forge a request to your executor. The `@wayai/executor-sdk`
 package does it for you and is the only supported path:
 
 ```ts
-import { createExecutor, toFetchHandler, ExecutorError } from 'rekor-sdk'
+import { createExecutor, toFetchHandler, ExecutorError } from '@wayai/executor-sdk'
 
 const handler = toFetchHandler(createExecutor({
   secret: process.env.REKOR_SIGNING_SECRET!, // the source/trigger signing secret
@@ -63,7 +63,7 @@ For Node/Express, use the Node adapter instead:
 
 ```ts
 import express from 'express'
-import { createExecutor, toNodeHandler } from 'rekor-sdk'
+import { createExecutor, toNodeHandler } from '@wayai/executor-sdk'
 
 const rekor = toNodeHandler(createExecutor({ secret: process.env.REKOR_SIGNING_SECRET!, handler: async (ctx) => { /* ... */ } }))
 const app = express()
@@ -88,7 +88,7 @@ key (so an at-least-once delivery never double-acts), and a normalized error env
   Rekor **inbound webhook**. Sign that write-back with the SDK's `signRequest` (the inverse of the verify side):
 
   ```ts
-  import { signRequest } from 'rekor-sdk'
+  import { signRequest } from '@wayai/executor-sdk'
   const url = 'https://api.rekor.pro/inbound/<org>/<db>/<inbound_webhook_id>/ingest'
   const body = JSON.stringify({ record_type: 'results', data: { /* ... */ } })
   const headers = await signRequest({ secret: process.env.REKOR_HOOK_SECRET!, method: 'POST', url, body })
@@ -133,7 +133,7 @@ On every proxied call Rekor advertises a **short-lived, single-use grant** to th
 credential by name with `fetchExecutorCredential`, passing the inbound request (it carries the grant):
 
 ```ts
-import { fetchExecutorCredential } from 'rekor-sdk';
+import { fetchExecutorCredential } from '@wayai/executor-sdk';
 
 // Inside your VERIFIED handler — pull ONCE per invocation and reuse (the grant is single-use per name).
 // The grant headers aren't signature-bound, so if you sit behind a TLS-terminating proxy, pin your origin.
